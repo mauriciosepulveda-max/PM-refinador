@@ -29,6 +29,27 @@ Todo en **un solo archivo HTML** interactivo, autocontenido y offline-first.
 
 ---
 
+## 🧹 Si te sientes perdido en cualquier momento
+
+Claude Code a veces crea ramas o carpetas de trabajo temporales durante sesiones largas. No te preocupes — eso es **estado local de tu máquina**, nunca se sube al repo.
+
+**Si ves que tu proyecto se ve "raro", ejecuta UN solo comando** en la terminal:
+
+```bash
+cd ~/Documents/PM-refinador
+bash scripts/limpiar.sh
+```
+
+Esto:
+- ✅ Te deja en la rama `main` (la oficial)
+- ✅ Borra ramas/worktrees temporales de sesiones anteriores
+- ✅ Baja los últimos cambios de GitHub
+- ✅ Te dice "✅ LISTO" cuando todo está bien
+
+Es **100% seguro** — no borra tu trabajo importante, solo basura de sesiones pasadas.
+
+---
+
 ## Inicio rápido
 
 ### 1. Clonar el proyecto
