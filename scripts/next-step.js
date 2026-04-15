@@ -107,9 +107,14 @@ function main() {
   const lastSnap = snapshots.length ? snapshots[snapshots.length - 1] : null;
   const lastEvPct = (lastSnap && bacTotal > 0) ? (+lastSnap.ev || 0) / bacTotal : 0;
 
-  // Informe y specs
+  // Informe y specs (specs viven embebidos en cada HU, no a nivel sprint)
   const hasInforme = !!(data.informe_cliente);
-  const hasSpecs = !!(data.specs);
+  const huConSpecs = historias.filter(h => Array.isArray(h.specs) && h.specs.length > 0);
+  const hasSpecs = huConSpecs.length > 0;
+  const huConSpecsAprobados = huConSpecs.filter(h =>
+    h.specs.some(s => String(s.estado || '').toUpperCase() === 'APROBADO')
+  );
+  const allSpecsApproved = hasSpecs && huConSpecs.length === totalHus && huConSpecsAprobados.length === totalHus;
 
   // Caso 2: HUs rechazadas o con feedback
   if (rechazadasOConFeedback > 0) {
@@ -183,16 +188,32 @@ function main() {
 
   // Caso 7: Informe hecho, sin specs
   if (!hasSpecs) {
-    banner([
-      `📋 Sprint ${sprintId} · informe cliente OK · sin specs SDD`,
+    finish([
+      `📋 Sprint ${sprintId} · informe cliente OK · sin specs ASDD`,
       '',
-      '➡ SIGUIENTE PASO: Generar specs SDD (spec-driven development)',
+      '➡ SIGUIENTE PASO: Generar specs ASDD (Agentic Spec-Driven Development)',
       `   /generar-specs ${sprintId}`,
       '',
-      '   Genera diagramas Mermaid, contratos de API y lista de tareas por HU',
-      '   aprobada. Requiere aprobación del cliente (HITL iterativo).',
-    ]);
-    process.exit(0);
+      '   Genera el contrato ejecutable por HU (5 secciones ASDD: Negocio·Arquitectura·',
+      '   Calidad·UX·Restricciones + diagramas Mermaid + Gate 0). Disponibles para',
+      '   descarga desde el dashboard → tab 📄 Specs.',
+    ], `output/${sprintId}/index.html`);
+  }
+
+  // Caso 7.5: Specs en BORRADOR, falta APROBADO de algunos
+  if (hasSpecs && !allSpecsApproved) {
+    const pendientes = totalHus - huConSpecsAprobados.length;
+    finish([
+      `📋 Sprint ${sprintId} · ${huConSpecs.length}/${totalHus} HUs con spec · ${huConSpecsAprobados.length}/${totalHus} aprobados`,
+      '',
+      '➡ SIGUIENTE PASO: Revisar specs e iterar pendientes',
+      `   1. Abrir output/${sprintId}/index.html → tab 📄 Specs`,
+      '   2. Descargar el .md de cada spec, revisar con el equipo',
+      `   3. Iterar con feedback: /generar-specs ${sprintId} --iterar <hu-id>`,
+      '   4. Cuando el spec pase Gate 0 + apruebes manualmente → estado: APROBADO',
+      '',
+      `   Faltan ${pendientes} spec(s) por aprobar para cerrar el sprint.`,
+    ], `output/${sprintId}/index.html`);
   }
 
   // Caso 8: Todo completo

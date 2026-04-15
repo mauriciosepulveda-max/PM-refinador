@@ -107,13 +107,33 @@ function main() {
   if (!manifestPath) die('falta manifest.json como argumento');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
+  // Cargar data.json previa (si existe) para preservar campos persistentes
+  // como historias[].specs[] que NO vienen del análisis sino del flujo /generar-specs.
+  // Esto evita que una regeneración del dashboard borre los specs ya creados.
+  let prevHistorias = [];
+  const prevDataPath = path.join(manifest.output_dir, 'data.json');
+  if (fs.existsSync(prevDataPath)) {
+    try {
+      const prev = JSON.parse(fs.readFileSync(prevDataPath, 'utf8'));
+      prevHistorias = Array.isArray(prev.historias) ? prev.historias : [];
+    } catch (_) { /* sin previa válida; sigue sin merge */ }
+  }
+  const prevByHu = {};
+  for (const h of prevHistorias) { if (h && h.hu_id) prevByHu[h.hu_id] = h; }
+
   const historias = [];
   for (const h of manifest.hus) {
     if (!fs.existsSync(h.source)) die(`fuente no existe: ${h.source}`);
     const hu = extractHuJson(h.source);
     if (!hu.hu_id) hu.hu_id = h.hu_id; // fallback
+    // Preservar specs[] de la versión previa de esta misma HU
+    const prev = prevByHu[hu.hu_id];
+    if (prev && Array.isArray(prev.specs) && prev.specs.length > 0 && !Array.isArray(hu.specs)) {
+      hu.specs = prev.specs;
+    }
     historias.push(hu);
-    console.log(`  ✓ ${hu.hu_id} (${(fs.readFileSync(h.source).length / 1024).toFixed(1)} KB)`);
+    const specCount = (hu.specs && hu.specs.length) || 0;
+    console.log(`  ✓ ${hu.hu_id} (${(fs.readFileSync(h.source).length / 1024).toFixed(1)} KB)${specCount?' · '+specCount+' spec(s) preservado(s)':''}`);
   }
 
   const metricas = computeMetrics(historias);

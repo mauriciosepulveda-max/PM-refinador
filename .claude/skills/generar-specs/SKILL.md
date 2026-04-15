@@ -1,99 +1,196 @@
 ---
 name: generar-specs
-description: Genera los Specs SDD (Spec-Driven Development) para las HUs aprobadas del sprint. Proceso HITL iterativo con versionamiento. Incluye diagramas Mermaid, contratos de API y lista de tareas. Requiere aprobación del cliente.
-argument-hint: "<sprint-id> [--hu US-XX] [--iterar US-XX]"
+description: Genera especificaciones ASDD (Agentic Spec-Driven Development, Sofka) para las HUs aprobadas del sprint. Ejecuta el pipeline ASDD de 5 pasos (Clasificación · Evaluación · Completitud · Análisis QUÉ/DÓNDE/POR QUÉ · Delegación). Produce specs por HU con Gate 0 + embed en data.json para descarga desde el dashboard. Soporta iteración HITL versionada.
+argument-hint: "<sprint-id> [--hu <hu-id>] [--iterar <hu-id>]"
 ---
 
 # Skill: generar-specs
 
-Genera especificaciones técnicas SDD para las HUs aprobadas, con proceso HITL de revisión iterativa.
+Genera especificaciones técnicas **ASDD** para las HUs aprobadas del sprint. Cada spec es un contrato ejecutable que permite a los agentes especializados (Backend, Frontend, QA) implementar sin ambigüedad.
+
+## Marco: ASDD (Sofka)
+
+> ASDD transforma requerimientos en software de alta calidad a través de un pipeline estructurado de 5 pasos. Ver `.claude/agents/spec-writer.md` para el marco completo.
+
+**Pilares:**
+- **Especificación estructurada** — El spec es el contrato ejecutable del sistema.
+- **Ejecución por agentes** — Backend/Frontend/QA trabajan sobre el spec sin preguntas al PM.
+- **Validación multidimensional** — Gate 0 valida estructura, completitud y mínima CoE.
+- **Gobernanza** — Políticas CoE aplicadas automáticamente.
 
 ## Activación
 
 ```
-/generar-specs Sprint-1                     # Genera specs para TODAS las HUs aprobadas
-/generar-specs Sprint-1 --hu US-01          # Solo para una HU específica
-/generar-specs Sprint-1 --iterar US-01      # Itera sobre un borrador existente con feedback
+/generar-specs Sprint-144                 # Todas las HUs aprobadas (lote inicial)
+/generar-specs Sprint-144 --hu US-01      # Solo una HU específica
+/generar-specs Sprint-144 --iterar US-01  # Itera sobre la última versión con feedback del PM
 ```
 
-## Precondiciones (BLOQUEANTES)
+---
 
-1. Debe existir `output/<sprint-id>/data.json`
-2. La HU objetivo debe tener `pm_aprobada: true`
-3. Si el cliente no ha confirmado → preguntar al PM:
+## Precondiciones (BLOQUEANTES — Paso 2 del pipeline)
+
+Verificar ANTES de lanzar spec-writer:
+
+| Gate | Verificación |
+|---|---|
+| **P2.1** | Existe `output/<sprint-id>/data.json` |
+| **P2.2** | Al menos 1 HU con `pm_aprobada: true` (si pasa `--hu`, esa HU debe cumplir) |
+| **P2.3** | HUs objetivo NO tienen preguntas de clarificación con `impacto: "Alto"` sin responder |
+| **P2.4** | `criteriosAceptacion.length >= criteriosOriginales.length` por HU (regla 11 del proyecto) |
+
+Si falla cualquiera → `[SPEC·PRE ✗] · <motivo>` y abortar sin invocar spec-writer.
+
+**Paso opcional pero recomendado:** si el cliente no ha aprobado el informe ejecutivo, preguntar al PM:
+```
+⚠️ El cliente aún no ha aprobado el informe ejecutivo del sprint.
+   a) Continuar con los specs de todas formas
+   b) Ejecutar /generar-informe primero (recomendado)
+```
+
+---
+
+## Pipeline ASDD — Ejecución por HU
+
+Por cada HU aprobada seleccionada:
+
+### Paso 0 · Clasificación
+`spec-writer` determina el tipo de artefacto. Para este framework siempre es **HU** (el Refinator trabaja con historias de usuario). Documentar en frontmatter: `tipo: HU`.
+
+### Paso 1 · Evaluación de calidad (INVEST)
+`spec-writer` revalida la HU bajo INVEST usando los scores ya calculados en `data.json` (`invest_score_norm`, `iso29148_score_norm`). Si el score es bajo (< 0.7), emitir warning en el spec — no bloquear, pero informar.
+
+### Paso 2 · Completitud / DoR
+Validar la Definition of Ready (ver lista en spec-writer.md). Si no cumple, listar fallos y abortar.
+
+### Paso 3 · Análisis Técnico Dirigido
+`spec-writer` genera la sección **QUÉ / DÓNDE / POR QUÉ** más las 5 secciones ASDD Capa 1:
+1. Negocio & Dominio
+2. Arquitectura
+3. Calidad
+4. Diseño & UX (si aplica)
+5. Restricciones
+
+Más: Lista de Tareas de Implementación (Paso 4 upstream), DoD, Trazabilidad.
+
+### Paso 4 · Delegación (no ejecutada aquí)
+El spec queda listo para que el orchestrator lo entregue al agente especializado (Backend/Frontend/QA). Esta skill **NO ejecuta el Paso 4** — solo lo habilita con un spec válido.
+
+---
+
+## Proceso HITL — iteración
+
+```
+Iteración 1:  spec-writer genera BORRADOR v1
+  Archivo: specs/<sprint-id>/<hu-id>-v1.spec.md
+  Frontmatter: estado: BORRADOR
+     ↓
+PM revisa el archivo (o desde el dashboard → tab Specs → botón descarga)
+     ↓
+PM da feedback:
+  a) "Apruebo el spec US-XX" → Gate 0 → APROBADO
+  b) "Necesita cambios: [descripción]" → /generar-specs Sprint-X --iterar US-XX
+  c) "Rechazar y rehacer desde cero" → /generar-specs Sprint-X --hu US-XX (v1 nuevo, preserva las anteriores)
+     ↓
+spec-writer genera v(N+1) incorporando feedback, SIN borrar versiones anteriores
+     ↓
+Gate 0 validación (auto + manual PM)
+     ↓
+Si pasa Gate 0 + PM confirma → estado: APROBADO en frontmatter
+```
+
+**Máximo 5 iteraciones por spec.** Si se supera, escalar al PM con la lista de puntos no resueltos.
+
+---
+
+## Gate 0 — Validación antes de APROBADO
+
+Antes de actualizar `estado: APROBADO`, ejecutar validación (manual por ahora; automatizable en Ola futura):
+
+**Estructural:**
+- [x] Frontmatter YAML completo
+- [x] 8 secciones presentes (Análisis QUÉ/DÓNDE/POR QUÉ + 5 secciones ASDD + Tareas + DoD)
+- [x] ≥ 1 diagrama Mermaid (SSD o flowchart)
+- [x] Tabla de trazabilidad no vacía
+
+**Completitud:**
+- [x] QUÉ/DÓNDE/POR QUÉ no vacío
+- [x] ≥ 3 requisitos funcionales numerados
+- [x] ≥ 2 CAs Gherkin refinados (happy + error)
+- [x] DoD con ≥ 5 checkboxes
+- [x] Sección "Restricciones" cita R-002/R-003/R-007
+
+**CoE mínima:**
+- [x] Sin tecnología bloqueada (AWS, Azure, Docker, MongoDB Atlas, Vercel Functions, Cloudflare Workers)
+- [x] Stack declarado alineado con el contexto técnico del proyecto
+
+Si falla cualquiera → `estado: EN_REVISION` + notas al final del spec listando los fallos específicos.
+
+---
+
+## Persistencia y embed en data.json
+
+Después de cada generación/iteración exitosa:
+
+1. El archivo `.md` queda escrito en `specs/<sprint-id>/<hu-id>-v<N>.spec.md`.
+2. **Actualizar `output/<sprint-id>/data.json`**: añadir o actualizar `historias[i].specs[]` con:
+   ```json
+   {
+     "version": "1.0",
+     "path": "specs/Sprint-144/US-01-v1.spec.md",
+     "estado": "BORRADOR",
+     "creado": "2026-04-14T10:30:00Z",
+     "aprobado_por": null,
+     "gate_0_passed": false,
+     "content_md": "<contenido íntegro del .md>"
+   }
    ```
-   ⚠️ ¿El cliente ha aprobado el informe del sprint?
-   Si → continuar con generación de specs
-   No → recomendar ejecutar /generar-informe primero
-   ```
+3. **Re-inyectar en el dashboard**: ejecutar `bash: node scripts/consolidate-sprint.js output/<sprint>/tmp/manifest.json`.
+4. El template HTML renderizará el nuevo estado del tab Specs automáticamente (tab siempre visible; contenido cambia según el array).
 
-## Proceso (por HU)
+`content_md` se embebe para que el dashboard pueda ofrecer descarga directa del .md sin acceso al filesystem (el usuario está en el navegador).
 
-### Paso 1: Evaluar Definition of Ready
-- ¿Tiene narrativa completa (Como/Quiero/Para)? ✓
-- ¿Tiene CAs en Gherkin (al menos 2)? ✓
-- ¿Tiene preguntas de clarificación SIN responder? ✗ → STOP, listarlas
-- ¿Está aprobada por el PM? ✓
+---
 
-### Paso 2: Generar BORRADOR v1
-Delegar al agente `@spec-writer` con:
-- La HU completa de `data.json`
-- El contexto funcional y técnico
-- Las dependencias y riesgos identificados
+## Output al PM
 
-### Paso 3: HITL — Revisión del equipo
-```
-📝 Spec generado: specs/<sprint-id>/US-XX-v1.spec.md
-
-Opciones:
-  a) "Apruebo el spec" → Claude marca como APROBADO
-  b) "Necesita cambios: [descripción]" → Claude genera v2
-  c) "Tengo preguntas: [preguntas]" → Claude responde y ajusta
-  d) "Rechazar y rehacer desde cero" → Claude genera nuevo v1
-```
-
-### Paso 4: Iteración (si --iterar)
-1. Leer el último spec versionado de la HU
-2. Leer el feedback del equipo
-3. Generar nueva versión (v(N+1)) preservando las anteriores
-4. Repetir hasta aprobación o máximo 5 iteraciones
-
-### Paso 5: Cierre
-Cuando el PM confirma que el spec está listo:
-1. Actualizar frontmatter: `estado: APROBADO`, `aprobado_por: <nombre>`
-2. Reportar al PM
+Al completar la generación (del lote o de una HU):
 
 ```
-══════════════════════════════════════════════════════
-  ✅ SPEC APROBADO: US-XX
-══════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════
+  ✅ SPECS GENERADOS · Sprint-144
+══════════════════════════════════════════════════════════════
 
-📄 Archivo final: specs/<sprint-id>/US-XX-v<N>.spec.md
-📊 Iteraciones: <N>
-👤 Aprobado por: <nombre>
+  📄 3 specs generados (BORRADOR):
+     · US-01-v1.spec.md  → specs/Sprint-144/US-01-v1.spec.md
+     · US-02-v1.spec.md  → specs/Sprint-144/US-02-v1.spec.md
+     · US-03-v1.spec.md  → specs/Sprint-144/US-03-v1.spec.md
 
-Próximo spec pendiente: US-YY
-══════════════════════════════════════════════════════
+  📊 Gate 0 automático:
+     · 2/3 pasaron estructural
+     · 1/3 con notas CoE (US-02: menciona "docker-compose" — revisar)
+
+  Dashboard actualizado: output/Sprint-144/index.html → tab 📄 Specs
+
+  Próximo paso:
+    · Revisa cada spec desde el dashboard (tab Specs → botón descarga .md)
+    · Itera con: /generar-specs Sprint-144 --iterar <hu-id>
+    · Aprueba manualmente con confirmación del PM (estado: APROBADO)
+══════════════════════════════════════════════════════════════
+
+[RR·CKPT] Specs listos · <N> BORRADORES · 0 APROBADOS
 ```
 
-## Nomenclatura
+Seguido del bloque de `next-step.js` que ahora detecta `has_specs` en data.json.
 
-```
-specs/
-└── Sprint-1/
-    ├── US-01-v1.spec.md   ← Borrador inicial
-    ├── US-01-v2.spec.md   ← Era iteración con cambios
-    ├── US-01-v3.spec.md   ← Versión APROBADA
-    ├── US-02-v1.spec.md
-    └── US-02-v2.spec.md   ← Versión APROBADA
-```
+---
 
-## Reglas SDD (NO NEGOCIABLES)
+## Reglas ASDD del skill
 
-1. **Sin spec APROBADO → sin implementación** — Recordar siempre al equipo.
-2. **Inmutabilidad de versiones** — Cada iteración es un NUEVO archivo. NUNCA sobreescribir.
-3. **Mermaid obligatorio** — Todo spec debe incluir al menos 1 diagrama de secuencia.
-4. **API contracts primero** — Si hay integración, el contrato es lo primero que se define.
-5. **Preguntas antes de borrador** — Si hay ambigüedades críticas, resolverlas ANTES.
-6. **Máximo 5 iteraciones** — Si se supera, escalar con lista de puntos sin resolver.
-7. **Trazabilidad total** — Toda sección del spec debe poder trazar a una HU y a tareas del task-estimator.
+1. **Sin HU aprobada → sin spec** — Precondición P2.2 bloqueante.
+2. **Inmutabilidad versiones** — Cada iteración es archivo nuevo.
+3. **Gate 0 obligatorio** para pasar a APROBADO.
+4. **Embed en data.json** — obligatorio para habilitar descarga desde dashboard.
+5. **Consolidar tras generar** — el dashboard debe reflejar el estado actual al instante.
+6. **Máximo 5 iteraciones** por spec.
+7. **Trazabilidad** — cada spec traza a data.json y a tareas del task-estimator.

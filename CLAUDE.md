@@ -372,7 +372,8 @@ Requirement Refinator/
 27. **UN SOLO HTML por sprint** -- `output/Sprint-X/index.html` es el único entregable visual.
 28. **Tabs del dashboard (fijas)**:
     1. **Dashboard Sprint** -- KPIs, gauges ISO, tabla HUs, HITL (Focus Mode via "Revisar HU").
-    2. **Avance del Sprint** -- EVM completo con PV/EV/AC iniciados en 0.
+    2. **Avance del Sprint** -- 4 sub-tabs: 💰 EVM (con PV/EV/AC iniciados en 0) · 📅 Cronograma · ⚠ Radar de Riesgos · 📄 Specs.
+       - Sub-tab Specs (siempre visible) tiene 3 estados: (a) esperando aprobación de HUs, (b) invitación a `/generar-specs`, (c) tabla con descarga `.md` por HU. Ver agente `spec-writer.md` para el marco ASDD.
     3. **Informe Cliente** -- Renderizado desde `data.json.informe_cliente`.
     4. **Informes** (dropdown) -- Exportar/importar Markdown, imprimir PDF.
 29. **`generar-informe` NO genera archivos externos** -- Enriquece `data.json` con `informe_cliente` y re-inyecta en el template.

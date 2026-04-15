@@ -624,6 +624,7 @@ input[type="date"]{color-scheme:dark}
       <button class="sub-tab active" data-sub="evm">💰 EVM</button>
       <button class="sub-tab" data-sub="gantt">📅 Cronograma</button>
       <button class="sub-tab" data-sub="riesgos">⚠️ Radar de Riesgos</button>
+      <button class="sub-tab" data-sub="specs">📄 Specs</button>
     </div>
 
     <div id="progress-content"></div>
@@ -1693,6 +1694,92 @@ indica "No documentado — requiere confirmación del equipo".</pre>
     });
   }
 
+  // ── Render Specs Panel (Tab 4 de Avance del Sprint · Ola 4 ASDD) ──
+  // Tres estados visibles según progreso del sprint:
+  //   1. < 100% HUs aprobadas → callout informativo, esperando aprobación
+  //   2. 100% aprobadas, sin specs generados → invitación a ejecutar /generar-specs
+  //   3. Specs generados → tabla con HU + versión + estado + botón de descarga
+  function renderSpecsPanel(){
+    const historias=(D&&D.historias)||[];
+    const total=historias.length;
+    const aprobadas=historias.filter(h=>h.pm_aprobada===true).length;
+    const huConSpecs=historias.filter(h=>Array.isArray(h.specs)&&h.specs.length>0);
+    const totalSpecs=huConSpecs.reduce((a,h)=>a+h.specs.length,0);
+    const aprobadosSpecs=huConSpecs.reduce((a,h)=>a+h.specs.filter(s=>String(s.estado||'').toUpperCase()==='APROBADO').length,0);
+
+    const headerHtml=
+      '<div class="card"><h2>📄 Specs ASDD <span class="ux-tip" data-tip="Especificaciones técnicas siguiendo el marco Agentic Spec-Driven Development (ASDD) de Sofka. Cada spec es un contrato ejecutable para que Backend, Frontend y QA puedan implementar sin ambigüedad.">?</span></h2>'+
+      '<p style="font-size:.84rem;color:var(--color-text-muted);margin-bottom:var(--space-3)">Pipeline ASDD: Clasificación → Evaluación → Completitud → Análisis QUÉ/DÓNDE/POR QUÉ → Delegación. Specs versionados con Gate 0 obligatorio antes de APROBADO.</p>';
+
+    // Estado 1 — sin todas las HUs aprobadas
+    if(total===0){
+      return headerHtml+'<p style="color:var(--color-text-muted);font-style:italic">Sin historias en el sprint.</p></div>';
+    }
+    if(aprobadas<total){
+      const faltantes=total-aprobadas;
+      return headerHtml+
+        '<div style="padding:var(--space-4);background:rgba(217,119,6,.1);border-left:3px solid #D97706;border-radius:var(--radius-md);font-size:.88rem">'+
+          '<strong style="color:#D97706">⏳ Specs aún no disponibles</strong><br>'+
+          '<span style="color:var(--color-text-muted)">Faltan <strong>'+faltantes+'</strong> HU(s) por aprobar (avance: '+aprobadas+'/'+total+'). Una vez todas estén aprobadas en la tab "Dashboard Sprint", podrás generar los specs ASDD aquí.</span>'+
+        '</div></div>';
+    }
+
+    // Estado 2 — todas aprobadas, sin specs
+    if(totalSpecs===0){
+      return headerHtml+
+        '<div style="padding:var(--space-4);background:rgba(22,163,74,.08);border-left:3px solid #16A34A;border-radius:var(--radius-md);font-size:.88rem;margin-bottom:var(--space-3)">'+
+          '<strong style="color:#16A34A">✅ '+total+'/'+total+' HUs aprobadas — listo para generar specs</strong>'+
+        '</div>'+
+        '<div style="padding:var(--space-4);background:var(--color-surface-2);border:1px solid var(--color-border);border-radius:var(--radius-md);font-family:var(--font-mono);font-size:.86rem">'+
+          '<div style="font-size:.7rem;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.4rem">▸ Para generar el primer borrador de los specs, ejecuta en Claude:</div>'+
+          '<div style="background:#000;color:#FF7E08;padding:var(--space-3);border-radius:var(--radius-sm);font-weight:700;font-size:1rem">/generar-specs '+esc((D&&D.meta&&D.meta.sprint_id)||'Sprint-X')+'</div>'+
+          '<div style="font-size:.78rem;color:var(--color-text-muted);margin-top:.6rem;line-height:1.5">El comando ejecuta el pipeline ASDD por cada HU aprobada, genera un .spec.md versionado por HU y los embebe en este dashboard. Aparecerán aquí mismo con un botón de descarga.</div>'+
+        '</div></div>';
+    }
+
+    // Estado 3 — specs generados, render tabla con descarga
+    let rowsHtml='';
+    historias.forEach(h=>{
+      const specs=Array.isArray(h.specs)?h.specs:[];
+      const last=specs.length?specs[specs.length-1]:null;
+      const estado=last?(String(last.estado||'BORRADOR').toUpperCase()):'(sin spec)';
+      const estadoCls=estado==='APROBADO'?'badge-green':estado==='EN_REVISION'?'badge-orange':estado==='BORRADOR'?'badge-gray':'badge-gray';
+      const ver=last?(last.version||(specs.length+'.0')):'—';
+      const gate0=last&&last.gate_0_passed?'✓':'⚠';
+      const fecha=last?(String(last.creado||'').slice(0,10)):'—';
+      const downloadBtn=last
+        ? '<button type="button" class="btn-spec-dl" data-hu="'+esc(h.hu_id)+'" data-ver="'+esc(ver)+'" title="Descargar '+esc(h.hu_id)+'-v'+esc(ver)+'.spec.md" style="padding:4px 12px;font-size:.78rem;border:1px solid var(--rr-orange);border-radius:4px;background:rgba(255,126,8,.15);color:var(--rr-orange);font-weight:700;cursor:pointer">⬇ .md</button>'
+        : '<span style="color:var(--color-text-muted);font-size:.76rem">—</span>';
+      rowsHtml+='<tr>'+
+        '<td><strong>'+esc(h.hu_id)+'</strong><br><span style="color:var(--color-text-muted);font-size:.7rem">'+esc(h.titulo_mejorado||h.titulo_original||'').slice(0,50)+'</span></td>'+
+        '<td style="text-align:center"><span class="hu-id">v'+esc(ver)+'</span></td>'+
+        '<td><span class="badge '+estadoCls+'">'+esc(estado)+'</span></td>'+
+        '<td style="text-align:center;font-size:1.1rem" title="Gate 0 (validación estructural + completitud + CoE)">'+gate0+'</td>'+
+        '<td style="font-size:.78rem;color:var(--color-text-muted)">'+esc(fecha)+'</td>'+
+        '<td style="text-align:center">'+(specs.length>1?'<span class="hu-id" title="Iteraciones previas">'+specs.length+'×</span>':'<span style="color:var(--color-text-muted);font-size:.76rem">1×</span>')+'</td>'+
+        '<td style="text-align:center">'+downloadBtn+'</td>'+
+      '</tr>';
+    });
+    const summary=
+      '<div style="display:flex;gap:var(--space-3);margin-bottom:var(--space-3);flex-wrap:wrap">'+
+        '<div class="kpi" style="flex:1;min-width:140px"><div class="kpi-label">HUs con spec</div><div class="kpi-value">'+huConSpecs.length+' / '+total+'</div></div>'+
+        '<div class="kpi" style="flex:1;min-width:140px"><div class="kpi-label">Aprobados</div><div class="kpi-value" style="color:'+(aprobadosSpecs===totalSpecs?'#16A34A':'#D97706')+'">'+aprobadosSpecs+' / '+totalSpecs+'</div></div>'+
+        '<div class="kpi" style="flex:1;min-width:140px"><div class="kpi-label">Total versiones</div><div class="kpi-value">'+totalSpecs+'</div></div>'+
+      '</div>';
+    return headerHtml+summary+
+      '<div style="overflow-x:auto"><table class="evm-table"><thead><tr>'+
+        '<th>Historia</th>'+
+        '<th>Versión</th>'+
+        '<th>Estado</th>'+
+        '<th>Gate 0 <span class="ux-tip" data-tip="Validación estructural + completitud + cumplimiento mínimo de CoE. Obligatoria antes de APROBADO.">?</span></th>'+
+        '<th>Creado</th>'+
+        '<th>Iteraciones <span class="ux-tip" data-tip="Cantidad de versiones de este spec (cada iteración es archivo nuevo, inmutable).">?</span></th>'+
+        '<th>Descargar</th>'+
+      '</tr></thead><tbody>'+rowsHtml+'</tbody></table></div>'+
+      '<p style="font-size:.78rem;color:var(--color-text-muted);margin-top:var(--space-3);font-style:italic">Para iterar un spec con feedback: <code style="background:var(--color-surface);padding:2px 6px;border-radius:3px">/generar-specs '+esc((D&&D.meta&&D.meta.sprint_id)||'Sprint-X')+' --iterar &lt;hu-id&gt;</code></p>'+
+      '</div>';
+  }
+
   // ── Render Progress ────────────────────────────────────
   function renderProgress(){
     if(!D||!D.historias){renderEmpty();return;}
@@ -2098,6 +2185,9 @@ indica "No documentado — requiere confirmación del equipo".</pre>
       '</div>'+
       '<div class="sub-panel" id="sub-riesgos">'+
         riesgosHtml2+
+      '</div>'+
+      '<div class="sub-panel" id="sub-specs">'+
+        renderSpecsPanel()+
       '</div>';
 
     // Wire EVM inputs — save on change but re-render only on blur to avoid flicker
@@ -2113,6 +2203,23 @@ indica "No documentado — requiere confirmación del equipo".</pre>
         }
       });
       inp.addEventListener('blur',()=>{ renderProgress(); });
+    });
+    // Descarga de spec ASDD por HU (Ola 4) — usa content_md embebido en data.json
+    document.querySelectorAll('.btn-spec-dl').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const huId=btn.dataset.hu;
+        const ver=btn.dataset.ver;
+        const h=(D.historias||[]).find(x=>x.hu_id===huId);
+        const specs=(h&&Array.isArray(h.specs))?h.specs:[];
+        const spec=specs.find(s=>String(s.version||'')===String(ver))||(specs.length?specs[specs.length-1]:null);
+        if(!spec||!spec.content_md){
+          flash('No hay contenido descargable para '+huId+' v'+ver+' (¿generaste los specs?)');
+          return;
+        }
+        const fname=huId+'-v'+(spec.version||ver)+'.spec.md';
+        download(fname,spec.content_md,'text/markdown');
+        flash('Descargando '+fname);
+      });
     });
     // Snapshot por HU — captura PV/EV/AC actual de la fila y lo guarda con fecha de hoy (Ola 3 · U3)
     document.querySelectorAll('.btn-snap-hu').forEach(btn=>{
