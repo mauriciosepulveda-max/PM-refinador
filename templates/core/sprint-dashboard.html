@@ -1074,11 +1074,19 @@ indica "No documentado — requiere confirmación del equipo".</pre>
           ac:sanitizeMoney(vals.ac),
         };
       });
-      const clean={snapshots:cleanSnaps,per_hu:cleanPerHu};
+      // Sanear per_hu_snapshots: diccionario hu_id → array de snapshots
+      const rawPerHuSnaps=(r.per_hu_snapshots&&typeof r.per_hu_snapshots==='object')?r.per_hu_snapshots:{};
+      const cleanPerHuSnaps={};
+      Object.entries(rawPerHuSnaps).forEach(([huId,arr])=>{
+        if(!sanitizeHuId(huId)||!Array.isArray(arr)) return;
+        const cleanArr=arr.map(sanitizeSnapshot).filter(Boolean);
+        if(cleanArr.length) cleanPerHuSnaps[huId]=cleanArr;
+      });
+      const clean={snapshots:cleanSnaps,per_hu:cleanPerHu,per_hu_snapshots:cleanPerHuSnaps};
       // Self-heal: si había datos inválidos, persistir la versión limpia
       if(JSON.stringify(r)!==JSON.stringify(clean)) localStorage.setItem(EVM_KEY,JSON.stringify(clean));
       return clean;
-    }catch(e){return{snapshots:[],per_hu:{}};}
+    }catch(e){return{snapshots:[],per_hu:{},per_hu_snapshots:{}};}
   }
   function saveEvm(e){ localStorage.setItem(EVM_KEY,JSON.stringify(e)); markDirty(); }
   function updateHu(id,patch){ const s=loadState(); s[id]=Object.assign({status:'pendiente',feedback:'',answers:{},pert:{},risks:{}},s[id]||{},patch); saveState(s); }
@@ -1765,8 +1773,58 @@ indica "No documentado — requiere confirmación del equipo".</pre>
     // Known roles in PERT but not declared
     const missingRols=Object.keys(pertByRol).filter(r=>!declaredRols.includes(r));
 
+    // ── Detección "sprint cerrable" (Ola 3 · U4) ──
+    // Condiciones AND: 100% HUs aprobadas · última medición EV/BAC ≥ 0.95 · sin riesgos Inaceptables abiertos.
+    // Fecha fin del sprint no es bloqueante (permite cerrar antes si el trabajo se completa).
+    let closableBannerHtml='';
+    try{
+      const historias=(D&&D.historias)||[];
+      const approvedCount=historias.filter(h=>h.pm_aprobada===true).length;
+      const allApproved=historias.length>0 && approvedCount===historias.length;
+      const lastSnap=snaps.length?snaps[snaps.length-1]:null;
+      const evPct=(lastSnap && bac_total>0)?(+lastSnap.ev||0)/bac_total:0;
+      const evmReady=evPct>=0.95;
+      const stateHu=loadState();
+      let inaceptablesAbiertos=0;
+      historias.forEach(h=>{
+        const rSt=(stateHu[h.hu_id]||{}).risks||{};
+        (h.riesgos||[]).forEach(r=>{
+          const entry=rSt[r.riesgo_id]||{};
+          const cerrado=entry.cerrado!=null?entry.cerrado:(r.estado===1);
+          if(cerrado) return;
+          const label=String(r.nivel_riesgo_label||'').toLowerCase();
+          const val=+r.nivel_riesgo_valor||0;
+          if(label.indexOf('inacept')>=0 || val>=15) inaceptablesAbiertos++;
+        });
+      });
+      if(allApproved && evmReady && inaceptablesAbiertos===0){
+        closableBannerHtml=
+          '<div style="margin:0 0 var(--space-4) 0;padding:var(--space-4) var(--space-5);background:linear-gradient(135deg,rgba(22,163,74,.15),rgba(22,163,74,.05));border:1px solid #16A34A;border-left:4px solid #16A34A;border-radius:var(--radius-md);display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap">'+
+            '<div style="font-size:2rem;line-height:1">✅</div>'+
+            '<div style="flex:1;min-width:240px">'+
+              '<div style="font-weight:700;color:#16A34A;font-size:1rem">Sprint listo para cierre formal</div>'+
+              '<div style="font-size:.82rem;color:var(--color-text-muted);margin-top:.2rem">'+
+                approvedCount+'/'+historias.length+' HUs aprobadas · '+
+                'EV '+(evPct*100).toFixed(0)+'% del BAC · '+
+                '0 riesgos Inaceptables abiertos.'+
+              '</div>'+
+            '</div>'+
+            '<div style="font-size:.8rem;color:var(--color-text-muted);text-align:right">→ Genera la Bitácora PMO (PDF o Word) con los botones en la sección EVM para compartir con el cliente.</div>'+
+          '</div>';
+      } else if(allApproved && historias.length>0){
+        // Sprint con HUs aprobadas pero no cerrable todavía — pista de qué falta
+        const blockers=[];
+        if(!evmReady) blockers.push('EV < 95% del BAC ('+((evPct*100).toFixed(0))+'%)');
+        if(inaceptablesAbiertos>0) blockers.push(inaceptablesAbiertos+' riesgo(s) Inaceptable(s) abierto(s)');
+        closableBannerHtml=
+          '<div style="margin:0 0 var(--space-4) 0;padding:var(--space-3) var(--space-4);background:rgba(217,119,6,.1);border-left:3px solid #D97706;border-radius:var(--radius-sm);font-size:.82rem;color:var(--color-text)">'+
+            '<strong style="color:#D97706">🟡 Sprint casi listo para cierre</strong> — falta: '+blockers.join(' · ')+'.'+
+          '</div>';
+      }
+    }catch(_e){ /* sin banner si falla la evaluación */ }
+
     // Sprint info
-    const sprintInfoHtml=
+    const sprintInfoHtml=closableBannerHtml+
       '<div class="card"><h2>📅 Datos del Sprint <span class="ux-tip" data-tip="Parámetros del sprint: fechas, capacidad y BAC.">?</span></h2>'+
       '<div class="sprint-dates-bar">'+
         '<div class="date-field"><label>Inicio <span class="ux-tip" data-tip="Primer día hábil. Formato YYYY-MM-DD o usa el calendario 📅">?</span></label>'+
@@ -1894,12 +1952,18 @@ indica "No documentado — requiere confirmación del equipo".</pre>
         ? 'Override manual. PERT: '+fmtEvm(b.bac_pert)+'. Pon 0 para volver al PERT.'
         : 'Editable. Al cambiar, actualiza la suma del BAC total del sprint.';
       const bacCellStyle=b.bac_override!=null?'border:1px solid var(--rr-orange);':'';
+      const snapsHu=(evm.per_hu_snapshots&&evm.per_hu_snapshots[b.hu_id])||[];
+      const lastSnap=snapsHu.length?snapsHu[snapsHu.length-1]:null;
+      const snapBtnTitle=lastSnap
+        ? 'Último snapshot: '+esc(lastSnap.fecha)+' · '+snapsHu.length+' total(es). Clic para registrar otro con valores actuales de PV/EV/AC.'
+        : 'Captura el PV/EV/AC actual de esta HU con la fecha de hoy como snapshot histórico.';
       evmRowsHtml+='<tr>'+
         '<td title="'+esc(b.titulo)+'"><strong>'+esc(b.hu_id)+'</strong><br><span style="color:var(--color-text-muted);font-size:.66rem">'+esc(b.titulo).slice(0,40)+'</span></td>'+
         '<td><input type="number" class="evm-input" data-hu="'+esc(b.hu_id)+'" data-k="bac" value="'+bacU.toFixed(curUnit==='hours'?1:0)+'" min="0" step="'+stepU+'" title="'+esc(bacTitle)+'" style="width:96px;'+bacCellStyle+'"></td>'+
         '<td><input type="number" class="evm-input" data-hu="'+esc(b.hu_id)+'" data-k="pv" value="'+pvU+'" min="0" step="'+stepU+'"></td>'+
         '<td><input type="number" class="evm-input" data-hu="'+esc(b.hu_id)+'" data-k="ev" value="'+evU+'" min="0" step="'+stepU+'"></td>'+
         '<td><input type="number" class="evm-input" data-hu="'+esc(b.hu_id)+'" data-k="ac" value="'+acU+'" min="0" step="'+stepU+'"></td>'+
+        '<td style="padding:0 4px"><button type="button" class="btn-snap-hu" data-hu="'+esc(b.hu_id)+'" title="'+esc(snapBtnTitle)+'" style="padding:2px 8px;font-size:.8rem;border:1px solid var(--color-border);border-radius:4px;background:var(--color-surface-2);color:var(--color-text);cursor:pointer">📸'+(snapsHu.length?'<sup style="font-size:.6rem;margin-left:.15rem;color:var(--rr-orange);font-weight:700">'+snapsHu.length+'</sup>':'')+'</button></td>'+
         '<td style="color:'+(cv_>=0?'#16A34A':'#DC2626')+'">'+fmtEvm(cv_)+'</td>'+
         '<td style="color:'+(sv_>=0?'#16A34A':'#DC2626')+'">'+fmtEvm(sv_)+'</td>'+
         '<td style="color:'+(cpi_>=0.95?'#16A34A':cpi_>=0.85?'#D97706':'#DC2626')+'">'+fmtNum(cpi_)+'</td>'+
@@ -1927,6 +1991,7 @@ indica "No documentado — requiere confirmación del equipo".</pre>
         '<th>VAC <span class="ux-tip" data-tip="BAC − EAC.">?</span></th>'+
         '<th>TCPI <span class="ux-tip" data-tip="(BAC−EV) ÷ (BAC−AC). >1.2 = alerta.">?</span></th>'+
         '<th>Estado</th>'+
+        '<th>📸 <span class="ux-tip" data-tip="Registrar un snapshot diario por HU (captura PV/EV/AC con fecha de hoy). El número indica cuántos snapshots lleva esta HU.">?</span></th>'+
       '</tr></thead><tbody>'+evmRowsHtml+'</tbody></table></div></div>';
 
     // Snapshot form
@@ -2048,6 +2113,27 @@ indica "No documentado — requiere confirmación del equipo".</pre>
         }
       });
       inp.addEventListener('blur',()=>{ renderProgress(); });
+    });
+    // Snapshot por HU — captura PV/EV/AC actual de la fila y lo guarda con fecha de hoy (Ola 3 · U3)
+    document.querySelectorAll('.btn-snap-hu').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const huId=btn.dataset.hu;
+        const e=loadEvm();
+        const cur=(e.per_hu&&e.per_hu[huId])||{pv:0,ev:0,ac:0};
+        if(!(+cur.pv||+cur.ev||+cur.ac)){
+          if(!confirm('La HU '+huId+' no tiene PV/EV/AC capturados. ¿Registrar snapshot con valores en 0?')) return;
+        }
+        const fecha=new Date().toISOString().slice(0,10);
+        e.per_hu_snapshots=e.per_hu_snapshots||{};
+        e.per_hu_snapshots[huId]=e.per_hu_snapshots[huId]||[];
+        // Evitar duplicados el mismo día: si ya hay snapshot con hoy, actualizarlo
+        const existingIdx=e.per_hu_snapshots[huId].findIndex(s=>s&&s.fecha===fecha);
+        const snap={fecha,pv:+cur.pv||0,ev:+cur.ev||0,ac:+cur.ac||0,registrado_en:new Date().toISOString()};
+        if(existingIdx>=0){ e.per_hu_snapshots[huId][existingIdx]=snap; flash('Snapshot de hoy actualizado · '+huId); }
+        else{ e.per_hu_snapshots[huId].push(snap); flash('Snapshot registrado · '+huId+' · '+fecha); }
+        saveEvm(e);
+        renderProgress();
+      });
     });
     document.querySelectorAll('.unit-btn').forEach(btn=>{
       btn.addEventListener('click',()=>{ saveUnit(btn.dataset.unit); renderProgress(); });

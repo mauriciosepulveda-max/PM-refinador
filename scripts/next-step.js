@@ -27,6 +27,17 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
+
+function worktreeInfoBlock(relPath) {
+  // Best-effort — si el script no está o falla, no imprimir nada
+  try {
+    const args = ['node', 'scripts/worktree-info.js'];
+    if (relPath) { args.push('--relative-path', relPath); }
+    const out = execSync(args.join(' '), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return out.trimEnd();
+  } catch (_) { return ''; }
+}
 
 function banner(lines) {
   const maxLen = Math.max(...lines.map(l => l.length), 40);
@@ -34,6 +45,13 @@ function banner(lines) {
   console.log(bar);
   lines.forEach(l => console.log('  ' + l));
   console.log(bar);
+}
+
+function finish(lines, relPath) {
+  banner(lines);
+  const wt = worktreeInfoBlock(relPath || null);
+  if (wt) console.log(wt);
+  process.exit(0);
 }
 
 function getArgs() {
@@ -60,6 +78,8 @@ function main() {
       '',
       '   (Requiere que las HUs existan en docs/HUs/' + sprintId + '/ y el contexto en docs/contexto/)',
     ]);
+    const wt = worktreeInfoBlock();
+    if (wt) console.log(wt);
     process.exit(0);
   }
 

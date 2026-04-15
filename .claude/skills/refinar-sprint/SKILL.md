@@ -15,7 +15,18 @@ Orquestador del Requirement Refinator. Analiza TODAS las HUs de un sprint y prod
 /refinar-sprint Sprint-144 --iteracion    # Re-analiza HUs rechazadas/con feedback
 /refinar-sprint Sprint-144 --consolidar   # Solo regenera index.html con data.json existente
 /refinar-sprint Sprint-144 --dry-run      # Pre-flight + 1 HU fixture, sin escribir outputs
+/refinar-sprint Sprint-144 --init         # Crea docs/HUs/Sprint-144/ + contextos desde templates
+/refinar-sprint Sprint-144 --ingest <ruta> # Copia HUs .md desde ruta externa al worktree
 ```
+
+## Modos de onboarding (--init / --ingest)
+
+Para reducir la fricción del PM al arrancar un sprint nuevo:
+
+- **`--init`** crea `docs/HUs/<sprint-id>/` vacío y copia `contexto-*.template.md` → `contexto-*.md` si aún no existen. Útil cuando las HUs se van a redactar directamente en el repo.
+- **`--ingest <ruta>`** copia todos los archivos `.md` sueltos de `<ruta>` a `docs/HUs/<sprint-id>/`. Si la ruta externa contiene `contexto-funcional.md` / `contexto-tecnico.md` (recursivo), los importa también. Valida que cada HU tenga narrativa + criterios de aceptación mínimos.
+
+Ambos modos delegan la lógica a `scripts/init-sprint.sh`. Al terminar, emiten el siguiente paso sugerido. NO corren el análisis — el PM ejecuta `/refinar-sprint <sprint-id>` después.
 
 ## Arquitectura (Principios)
 
