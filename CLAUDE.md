@@ -91,6 +91,53 @@ Si el asistente detecta que ya publicó un anuncio sin tool call en un turno pre
 6. **Eficiencia de invocaciones** -- 1 invocación por HU + 0-1 reintentos por quality gates.
 7. **Autocontención del orquestador** -- El orquestador recibe TODO lo que necesita en un único prompt y no vuelve a preguntar al asistente padre. Si algo falta, aborta con `[RR·CKPT] PRE ✗`.
 8. **Checkpoints visibles** -- Cada fase emite un `[RR·CKPT]` en texto plano (fuera de tool call) para que el PM vea progreso.
+9. **Orquestación adaptativa por tamaño del sprint** -- Ver sección siguiente.
+
+---
+
+## 🎚 Threshold: cuándo usar sub-agente orchestrator vs orquestación directa
+
+**Constante:** `ORCHESTRATOR_HU_THRESHOLD = 5`
+
+El framework soporta dos modos de orquestación. La skill `refinar-sprint` decide cuál usar según el número de HUs detectadas en Fase -1.
+
+### Modo A — Sub-agente `orchestrator` (para sprints pequeños)
+
+**Cuándo:** `N_HUs ≤ 5`.
+
+**Flujo:** La skill delega todas las fases (0→5) al sub-agente `orchestrator` con un único prompt autocontenido. El sub-agente lee contexto, lanza los N analizadores en paralelo, consolida y genera el HTML.
+
+**Ventaja:** Una sola invocación de tool desde el asistente principal; lógica encapsulada.
+**Límite:** A partir de ~6 HUs el contexto del sub-agente se infla (5 archivos de inputs + N prompts de análisis + N JSONs de respuesta) y puede agotar su presupuesto de tokens.
+
+### Modo B — Orquestación directa desde la skill (para sprints grandes)
+
+**Cuándo:** `N_HUs > 5`.
+
+**Flujo:**
+1. La skill `refinar-sprint` corre Fase -1 y Fase 0 directamente (lee inputs, arma `contexto_condensado`).
+2. Lanza los N `hu-full-analyzer` en paralelo desde el asistente principal (sin sub-agente intermedio).
+3. Recoge los N JSONs en `output/<sprint>/tmp/<hu_id>.json`.
+4. Ejecuta `bash` → `node scripts/consolidate-sprint.js <manifest>` para consolidar + inyectar HTML.
+5. El sub-agente `orchestrator` solo se usa (opcional) para el reporte final con `mode=report-only`.
+
+**Ventaja:** Cada `hu-full-analyzer` consume su propio presupuesto de tokens (aislado); el asistente principal solo bufferea los N JSONs. Escalable a 15-20 HUs.
+**Límite:** Requiere que el asistente principal siga el contrato paso a paso sin perderse (ver regla "Punto de entrada del asistente" y "Regla anti-anuncio sin ejecución").
+
+### Regla de decisión
+
+```
+Fase -1 (preflight OK) → N = count(glob(docs/HUs/<sprint>/*.md))
+  if N == 0            → abortar con [RR·CKPT] PRE ✗ · no hay HUs
+  if N ≤ 5             → Modo A (sub-agente orchestrator)
+  if N > 5             → Modo B (orquestación directa + consolidate-sprint.js)
+```
+
+La skill `refinar-sprint` DEBE declarar el modo elegido en un checkpoint visible:
+
+```
+[RR·CKPT] Modo B · 11 HUs > threshold (5) · orquestando desde el asistente principal
+```
 
 ---
 

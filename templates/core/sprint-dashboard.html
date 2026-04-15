@@ -911,12 +911,40 @@ indica "No documentado — requiere confirmación del equipo".</pre>
   function loadCustomBacH(){ const v=localStorage.getItem(BAC_KEY); return v!=null?+v:null; }
   function saveCustomBacH(v){ if(v>0){localStorage.setItem(BAC_KEY,String(v));markDirty();}else{localStorage.removeItem(BAC_KEY);} }
   // BAC override por HU (en COP). Si una HU tiene override, su BAC se sobreescribe; la suma total se recalcula.
-  function loadCustomBacHU(){ try{return JSON.parse(localStorage.getItem(BAC_HU_KEY)||'{}')||{};}catch(e){return{};} }
+  function loadCustomBacHU(){
+    try{
+      const r=JSON.parse(localStorage.getItem(BAC_HU_KEY)||'{}')||{};
+      const clean={};
+      Object.entries(r).forEach(([huId,cop])=>{
+        if(sanitizeHuId(huId)){
+          const money=sanitizeMoney(cop);
+          if(money>0) clean[huId]=money;
+        }
+      });
+      if(JSON.stringify(r)!==JSON.stringify(clean)) localStorage.setItem(BAC_HU_KEY,JSON.stringify(clean));
+      return clean;
+    }catch(e){return{};}
+  }
   function saveCustomBacHU(map){ localStorage.setItem(BAC_HU_KEY,JSON.stringify(map||{})); markDirty(); }
   function getCustomBacHU(huId){ const m=loadCustomBacHU(); return m[huId]; }
   function setCustomBacHU(huId,cop){ const m=loadCustomBacHU(); if(cop!=null&&+cop>0){m[huId]=+cop;}else{delete m[huId];} saveCustomBacHU(m); }
   // Capacity helpers
-  function loadCap(){ try{return JSON.parse(localStorage.getItem(CAP_KEY)||'{}');}catch(e){return{};} }
+  function loadCap(){
+    try{
+      const r=JSON.parse(localStorage.getItem(CAP_KEY)||'{}');
+      // Sanear: horas_eventos debe ser número no-negativo; roles debe ser array de {rol, personas}
+      const clean={};
+      if(r&&typeof r==='object'){
+        if(r.horas_eventos!=null) clean.horas_eventos=sanitizeNumberInRange(r.horas_eventos,0,1000,0);
+        if(Array.isArray(r.roles)){
+          clean.roles=r.roles.filter(x=>x&&typeof x.rol==='string'&&/^[A-Z]{2,8}$/.test(x.rol))
+            .map(x=>({rol:x.rol,personas:sanitizeNumberInRange(x.personas,0,50,0)}));
+        }
+      }
+      if(JSON.stringify(r)!==JSON.stringify(clean)) localStorage.setItem(CAP_KEY,JSON.stringify(clean));
+      return clean;
+    }catch(e){return{};}
+  }
   function saveCap(o){ localStorage.setItem(CAP_KEY,JSON.stringify(o||{})); markDirty(); }
   function toUnit(cop){
     const u=loadUnit();
@@ -938,6 +966,33 @@ indica "No documentado — requiere confirmación del equipo".</pre>
     if(v>=1e6)return'$'+(v/1e6).toFixed(1)+'M'; if(v>=1e3)return'$'+(v/1e3).toFixed(0)+'K'; return'$'+Math.round(v);
   }
 
+  // ── Sanitizers generalizados (Ola 2 · A4) ──────────────
+  // Rechaza o clamp-ea inputs inválidos que podrían venir de:
+  //   · localStorage de versiones previas con bugs conocidos
+  //   · imports de Markdown con round-trip incompleto
+  //   · manipulación manual del JSON por un PM avanzado
+  // Todos retornan un valor seguro o null/0 según corresponda.
+  function sanitizeNumberInRange(n,min,max,fallback){
+    const v=+n; if(!isFinite(v)) return (fallback!=null?fallback:null);
+    if(v<min) return min; if(v>max) return max; return v;
+  }
+  function sanitizeMoney(n){ const v=+n; if(!isFinite(v)||v<0) return 0; return v; }
+  function sanitizeHuId(s){ if(!s||typeof s!=='string') return null; return /^[A-Za-z0-9][A-Za-z0-9_\-.]{0,63}$/.test(s)?s:null; }
+  function sanitizeSnapshot(s){
+    if(!s||typeof s!=='object') return null;
+    const fecha=sanitizeISODate(s.fecha);
+    if(!fecha) return null;
+    return{
+      fecha,
+      pv:sanitizeMoney(s.pv),
+      ev:sanitizeMoney(s.ev),
+      ac:sanitizeMoney(s.ac),
+      cpi:isFinite(+s.cpi)?+s.cpi:0,
+      spi:isFinite(+s.spi)?+s.spi:0,
+      notas:typeof s.notas==='string'?s.notas:'',
+      registrado_en:typeof s.registrado_en==='string'?s.registrado_en:new Date().toISOString(),
+    };
+  }
   // ── Date helpers ───────────────────────────────────────
   // Sanea fechas persistidas de versiones previas con bug de año (ej. "0002-04-15")
   function sanitizeISODate(s){
@@ -1002,7 +1057,29 @@ indica "No documentado — requiere confirmación del equipo".</pre>
   function loadState(){ try{return JSON.parse(localStorage.getItem(LS_KEY))||{};}catch(e){return{};} }
   function saveState(s){ localStorage.setItem(LS_KEY,JSON.stringify(s)); markDirty(); }
   function huState(id){ const s=loadState(); if(!s[id])s[id]={status:'pendiente',feedback:'',answers:{},pert:{},risks:{}}; return s[id]; }
-  function loadEvm(){ try{const r=JSON.parse(localStorage.getItem(EVM_KEY)||'{}');r.snapshots=r.snapshots||[];r.per_hu=r.per_hu||{};return r;}catch(e){return{snapshots:[],per_hu:{}}; } }
+  function loadEvm(){
+    try{
+      const r=JSON.parse(localStorage.getItem(EVM_KEY)||'{}');
+      // Sanear snapshots: descartar los que tengan fecha bogus o valores no-numéricos
+      const rawSnaps=Array.isArray(r.snapshots)?r.snapshots:[];
+      const cleanSnaps=rawSnaps.map(sanitizeSnapshot).filter(Boolean);
+      // Sanear per_hu: PV/EV/AC deben ser números ≥ 0; hu_id debe pasar regex
+      const rawPerHu=(r.per_hu&&typeof r.per_hu==='object')?r.per_hu:{};
+      const cleanPerHu={};
+      Object.entries(rawPerHu).forEach(([huId,vals])=>{
+        if(!sanitizeHuId(huId)||!vals||typeof vals!=='object') return;
+        cleanPerHu[huId]={
+          pv:sanitizeMoney(vals.pv),
+          ev:sanitizeMoney(vals.ev),
+          ac:sanitizeMoney(vals.ac),
+        };
+      });
+      const clean={snapshots:cleanSnaps,per_hu:cleanPerHu};
+      // Self-heal: si había datos inválidos, persistir la versión limpia
+      if(JSON.stringify(r)!==JSON.stringify(clean)) localStorage.setItem(EVM_KEY,JSON.stringify(clean));
+      return clean;
+    }catch(e){return{snapshots:[],per_hu:{}};}
+  }
   function saveEvm(e){ localStorage.setItem(EVM_KEY,JSON.stringify(e)); markDirty(); }
   function updateHu(id,patch){ const s=loadState(); s[id]=Object.assign({status:'pendiente',feedback:'',answers:{},pert:{},risks:{}},s[id]||{},patch); saveState(s); }
 

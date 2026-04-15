@@ -28,8 +28,21 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 function die(msg, code) { console.error('✗ ' + msg); process.exit(code || 1); }
+
+function checkpointSave(sprintId, phase, data) {
+  // Best-effort — si checkpoint.js falla no bloqueamos el flujo.
+  try {
+    const dataArg = data ? ` --data='${JSON.stringify(data).replace(/'/g, "'\\''")}'` : '';
+    execSync(`node scripts/checkpoint.js save ${sprintId} ${phase}${dataArg}`, { stdio: 'ignore' });
+  } catch (_) { /* silent */ }
+}
+function checkpointClear(sprintId) {
+  try { execSync(`node scripts/checkpoint.js clear ${sprintId}`, { stdio: 'ignore' }); }
+  catch (_) { /* silent */ }
+}
 
 function extractHuJson(filePath) {
   const raw = fs.readFileSync(filePath, 'utf8').trim();
@@ -122,6 +135,7 @@ function main() {
   const dataPath = path.join(manifest.output_dir, 'data.json');
   fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
   console.log(`[RR·CKPT] Fase 3 ✓ · data.json consolidado (${(fs.statSync(dataPath).size / 1024).toFixed(1)} KB)`);
+  checkpointSave(manifest.sprint_id, 'consolidated', { data_path: dataPath });
 
   // ── Inyección del JSON en el template HTML ──
   // CONTRATO (regla A5 de la retrospectiva — NO MODIFICAR sin test de regresión):
@@ -164,6 +178,7 @@ function main() {
     die(`[RR·CKPT] Fase 4 ✗ · JSON inyectado es inválido: ${e.message}. Causa típica: caracteres especiales ("$", "</script>") no escapados. index.html fue eliminado.`);
   }
   console.log(`[RR·CKPT] Fase 4 ✓ · post-write validation OK (JS parsea, JSON evaluable)`);
+  checkpointSave(manifest.sprint_id, 'injected', { html_path: htmlPath });
 
   // Reporte
   console.log('');
@@ -185,6 +200,13 @@ function main() {
   console.log(`  Dashboard: ${htmlPath}`);
   console.log('══════════════════════════════════════════════════════════════');
   console.log('[RR·CKPT] Fase 5 · listo');
+  // Éxito completo: limpiar checkpoint para no confundir corridas futuras.
+  checkpointClear(manifest.sprint_id);
+
+  // Emitir siguiente paso sugerido al PM (U2 de Ola 2)
+  try {
+    execSync(`node scripts/next-step.js ${manifest.sprint_id}`, { stdio: 'inherit' });
+  } catch (_) { /* next-step es informativo, no bloqueamos si falla */ }
 }
 
 main();

@@ -116,7 +116,18 @@ Mostrar al PM el `sprint_config` resultante en un bloque compacto antes de Fase 
 
 ---
 
-### Fases 1-5 — DELEGAR al orquestador (un solo tool call autocontenido)
+### Decisión de modo (threshold ORCHESTRATOR_HU_THRESHOLD = 5)
+
+Tras Fase 0, contar `N = count(docs/HUs/<sprint-id>/*.md)` y elegir:
+
+```
+if N ≤ 5 → Modo A — sub-agente orchestrator (bloque "Fases 1-5 Modo A")
+if N > 5 → Modo B — orquestación directa (bloque "Fases 1-5 Modo B")
+```
+
+Emitir `[RR·CKPT] Modo <A|B> · <N> HUs · <motivo>` antes de continuar.
+
+### Fases 1-5 Modo A — DELEGAR al orquestador (sprints ≤ 5 HUs)
 
 Emitir UN SOLO `Agent(subagent_type="orchestrator", prompt=...)` con el contrato siguiente. El orchestrator NO debe hacer ping-pong al asistente; recibe TODO aquí.
 
@@ -171,6 +182,52 @@ return:
 ```
 
 Regla: el orchestrator recibe TODO de una vez. No puede pedir al padre que relea archivos. Si algún path no existe, aborta con `[RR·CKPT] PRE ✗ · <motivo>` y retorna error — NO con pregunta.
+
+---
+
+### Fases 1-5 Modo B — Orquestación directa (sprints > 5 HUs)
+
+El asistente principal ejecuta las fases paso a paso (evita token-limit del sub-agente monolítico con muchas HUs). Contrato:
+
+**Fase 1 — Análisis en paralelo (asistente principal):**
+
+1. Antes de lanzar, consultar el checkpoint: `bash scripts/checkpoint.js list-completed <sprint-id>` → devuelve IDs de HUs ya analizadas (JSONs existentes en `tmp/`).
+2. Lanzar en paralelo (un mensaje con N `Agent(subagent_type="hu-full-analyzer", prompt=...)`, donde N = HUs pendientes):
+   ```
+   [SPRINT]: <sprint-id>
+   [HU_FILENAME]: <nombre archivo>
+   [CONTEXTO_CONDENSADO]: <texto armado en Fase 0>
+   [LISTA_HUs_SPRINT]: <lista>
+   [CONTENIDO_COMPLETO_HU]: <contenido íntegro>
+   Responde SOLO con el JSON conforme a hu-calidad.schema.json.
+   ```
+3. Guardar cada JSON de respuesta en `output/<sprint-id>/tmp/<hu_id>.json` (usar Write).
+4. Tras recibir los N: `[RR·CKPT] Fase 1 ✓ · N JSONs recibidos`.
+5. `bash scripts/checkpoint.js save <sprint-id> analysis_complete` para persistir progreso.
+
+**Fase 2-4 — Consolidación + HTML (vía script):**
+
+```
+bash: node scripts/consolidate-sprint.js output/<sprint-id>/tmp/manifest.json
+```
+
+El script:
+- Lee todos los JSONs de `tmp/`
+- Aplica quality gates (G1-G4 + G_SCHEMA)
+- Calcula `metricas_sprint`
+- Escribe `data.json` + `index.html` con validación post-write (G3.1/G3.2)
+- Limpia `.checkpoint.json` al terminar OK
+
+**Fase 5 — Reporte final:**
+
+Ejecutar `bash: node scripts/next-step.js <sprint-id>` para emitir el siguiente paso sugerido al PM.
+
+**Protocolo de resumabilidad:**
+
+Si el asistente detecta `output/<sprint-id>/.checkpoint.json` al iniciar Fase 1, debe:
+1. Leer el checkpoint.
+2. Saltar HUs que ya estén en `tmp/`.
+3. Emitir: `[RR·CKPT] Modo B · resumiendo desde checkpoint · <X>/<N> HUs ya analizadas`.
 
 ---
 
