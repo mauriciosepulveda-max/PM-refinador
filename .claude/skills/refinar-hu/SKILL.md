@@ -15,7 +15,17 @@ Procesa **una sola Historia de Usuario** con maxima profundidad de analisis.
 /refinar-hu Sprint-2 HU-LOGIN.md
 ```
 
+## Modo de orquestación
+
+`/refinar-hu` siempre opera en **Modo A** (1 HU = 1 `hu-full-analyzer`, siempre por debajo del threshold `ORCHESTRATOR_HU_THRESHOLD=5`). No requiere orquestación distribuida.
+
+Cada fase emite un `[RR·CKPT]` visible al PM.
+
 ## Proceso
+
+### Fase -1 — Pre-flight
+
+Ejecutar `bash: bash scripts/preflight-check.sh`. Si exit ≠ 0, abortar con `[RR·CKPT] PRE ✗` sin preguntar.
 
 ### Fase 0 — Validacion de Insumos (BLOQUEANTE)
 
@@ -45,10 +55,13 @@ Lanzar 1 agente `hu-full-analyzer` con:
 
 | Gate | Condicion | Accion si falla |
 |------|-----------|-----------------|
-| G1 | CAs >= CAs originales | Relanzar agente |
-| G2 | Todas las tareas con DoD | Relanzar agente |
-| G3 | Todas las tareas con PERT triple | Relanzar agente |
-| G4 | calificacion_iso es 0-5 | Recalcular |
+| G1 | CAs >= CAs originales | Relanzar agente (máx 1 reintento) |
+| G2 | Todas las tareas con DoD (≥ 15 chars) | Relanzar agente |
+| G3 | Todas las tareas con PERT triple coherente (O ≤ P ≤ Pe) | Relanzar agente |
+| G4 | calificacion_iso es número 0-5 | Recalcular determinísticamente |
+| G_SCHEMA | JSON válido contra `templates/core/hu-calidad.schema.json` | Correr `node scripts/validate-hu-json.js <path>` vía `Bash` |
+
+Si falla 2 veces → `quality_gate_failed: true`, continuar con la HU marcada.
 
 ### Fase 4 — Generacion de Output
 
@@ -70,10 +83,11 @@ Lanzar 1 agente `hu-full-analyzer` con:
 
   Dashboard: output/<sprint-id>/index.html
 
-  Siguiente: /refinar-hu <sprint-id> <otra-hu>
-  O todas:   /refinar-sprint <sprint-id>
+  [RR·CKPT] Fase 5 · listo · HU acumulada en data.json
 ══════════════════════════════════════════════════════════════
 ```
+
+Ejecutar `bash: node scripts/next-step.js <sprint-id>` para que el PM vea automáticamente el siguiente paso según el estado del sprint (más HUs por refinar, revisar HITL, iterar, etc.).
 
 ## Reglas
 

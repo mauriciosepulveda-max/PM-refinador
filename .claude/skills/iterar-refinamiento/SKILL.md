@@ -16,38 +16,60 @@ Re-analiza las HUs de un sprint con el feedback del equipo, preservando las ya a
 
 Equivalente a: `/refinar-sprint Sprint-1 --iteracion`
 
+## Modo de orquestación
+
+Elige según cantidad de HUs a re-analizar (threshold `ORCHESTRATOR_HU_THRESHOLD=5`):
+- **N ≤ 5** → Modo A: delegar al sub-agente `orchestrator` con `mode=iteracion`
+- **N > 5** → Modo B: orquestación directa desde el asistente (mismo flujo que `/refinar-sprint` Modo B)
+
+**Snapshot guard obligatorio**: antes de re-escribir `data.json`, copiar el actual a `output/<sprint-id>/data.previous.json`. Post-merge, verificar que las HUs con `pm_aprobada: true` no cambiaron; si alguna lo hizo, revertir al snapshot y abortar.
+
 ## Proceso
 
+### Fase -1 · Pre-flight
+Ejecutar `bash: bash scripts/preflight-check.sh`. Si exit ≠ 0, abortar con `[RR·CKPT] PRE ✗`.
+
+### Fase 0 · Lectura + clasificación
 1. Leer `output/<sprint-id>/data.json`
 2. Clasificar HUs:
 
 | Categoría | Condición | Acción |
 |-----------|-----------|--------|
-| ✅ Aprobadas | `pm_aprobada: true` | **PRESERVAR** — no tocar |
-| 🔄 Con feedback | `pm_feedback` no vacío | RE-ANALIZAR con feedback como input adicional |
+| ✅ Aprobadas | `pm_aprobada: true` | **PRESERVAR** — inmutables (snapshot guard las protege) |
+| 🔄 Con feedback | `pm_feedback` no vacío | RE-ANALIZAR con feedback como `[FEEDBACK_PREVIO_DEL_PM]` en el prompt |
 | ❌ Rechazadas | `pm_aprobada: false` | RE-ANALIZAR desde cero |
-| ⏸ Sin revisar | `pm_aprobada: null` | Mantener, pero advertir al PM |
+| ⏸ Sin revisar | `pm_aprobada: null` | Mantener, advertir al PM |
 
-3. Para cada HU a re-analizar:
-   - Pasar a los agentes el feedback del PM como contexto adicional
-   - Pasar las preguntas del PM respondidas (si las hubo)
-   - Los agentes deben mejorar su análisis anterior
+`[RR·CKPT] Fase 0 ✓ · N a re-analizar · M preservadas · K sin revisar`
 
-4. Actualizar `data.json` y regenerar `index.html`
-5. Reportar:
+### Fase 1-4 · Re-análisis + consolidación
+El asistente (Modo B) o el sub-agente `orchestrator` (Modo A):
+- Lanza `hu-full-analyzer` sólo para las HUs pendientes, con el feedback del PM en el prompt.
+- Re-consolida vía `scripts/consolidate-sprint.js` que ahora **preserva automáticamente** `historias[].specs[]` de la versión anterior (Ola 4).
+- Valida con snapshot guard que ninguna HU aprobada cambió.
 
+### Fase 5 · Reporte
 ```
-🔄 Iteración completada para <sprint-id>
+══════════════════════════════════════════════════════════════
+  🔄 ITERACIÓN · <sprint-id>
+══════════════════════════════════════════════════════════════
 
-Re-analizadas: <N> HUs
-Preservadas: <N> HUs aprobadas
-Pendientes: <N> HUs sin revisar
+  Re-analizadas: <N> HUs (rechazadas/con feedback)
+  Preservadas:   <M> HUs aprobadas (snapshot guard OK)
+  Pendientes:    <K> HUs sin revisar
+  Specs:         <S> preservados de la iteración anterior (si aplica)
 
-📂 Dashboard actualizado: output/<sprint-id>/index.html
+  Dashboard: output/<sprint-id>/index.html
+
+  [RR·CKPT] Fase 5 · iteración lista
+══════════════════════════════════════════════════════════════
 ```
+
+Ejecutar `bash: node scripts/next-step.js <sprint-id>` para emitir el siguiente paso sugerido según el nuevo estado (más HUs aprobadas → generar informe; todas aprobadas → generar specs; etc.).
 
 ## Reglas
 
-- **NUNCA tocar HUs aprobadas** — Son inmutables hasta que el PM cambie su estado.
-- **Feedback como contexto** — El PM feedback se pasa como input al agente, no se descarta.
-- **Historial** — Mantener una nota en `data.json` de que es una iteración (N de iteración).
+- **NUNCA tocar HUs aprobadas** — Snapshot guard lo enforza.
+- **Feedback como contexto** — El `pm_feedback` se pasa como input al agente, no se descarta.
+- **Preservar specs** — `consolidate-sprint.js` preserva `historias[].specs[]` de la versión previa automáticamente.
+- **Historial** — Mover las métricas actuales a `data.json.iteracion_anterior` antes de re-escribir.

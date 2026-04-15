@@ -243,15 +243,43 @@ Escribir `outputs_paths.data_json`.
 [RR·CKPT] Fase 5 · listo
 ```
 
-Tabla de siguiente paso (según estado):
+Tabla de siguiente paso (sincronizada con `scripts/next-step.js`):
 
-| Estado detectado | Siguiente paso sugerido |
-|-----------------|------------------------|
-| HUs sin revisar | Abrir dashboard, revisar HUs, aprobar/rechazar en HITL |
-| Hay HUs con feedback/rechazo | `/refinar-sprint <sprint-id> --iteracion` |
-| Todas aprobadas | Registrar mediciones EVM en tab "Avance del Sprint" |
-| Sprint con mediciones | Generar Bitácora PMO desde el dashboard |
-| Último día del sprint | Exportar respaldo final + retrospectiva (actualizar contextos) |
+| Caso | Estado detectado | Siguiente paso sugerido |
+|------|------------------|------------------------|
+| 1 | No existe `output/<sprint>/data.json` | `/refinar-sprint <sprint>` |
+| 2 | Alguna HU rechazada o con `pm_feedback` | `/refinar-sprint <sprint> --iteracion` |
+| 3 | `aprobadas < total` | Abrir dashboard, revisar HUs pendientes en HITL |
+| 4 | 100% aprobadas, sin snapshots EVM | Registrar mediciones EVM en tab "Avance del Sprint" |
+| 5 | EVM con EV/BAC < 0.95 | Continuar midiendo hasta EV ≥ 95% del BAC |
+| 6 | Sprint cerrable sin `informe_cliente` | `/generar-informe <sprint>` |
+| 7 | Informe hecho, sin specs ASDD | `/generar-specs <sprint>` |
+| 7.5 | Specs en BORRADOR, falta aprobar algunos | Revisar cada spec desde tab Specs → iterar con `--iterar <hu-id>` |
+| 8 | Todo completo (specs APROBADO, EVM cerrada) | Generar Bitácora PMO · actualizar contextos para próximo sprint |
+
+Al terminar la Fase 5, ejecutar `bash: node scripts/next-step.js <sprint-id>` para que el script emita el banner correcto automáticamente.
+
+---
+
+## Integración con el flujo de specs (Ola 4 ASDD)
+
+Tras el éxito de `/refinar-sprint`, el PM puede seguir el ciclo:
+
+```
+/refinar-sprint Sprint-X      → dashboard con HUs refinadas
+  → PM aprueba HUs en HITL
+    → /generar-informe Sprint-X  → tab "Informe Cliente"
+      → /generar-specs Sprint-X  → specs ASDD por HU (embed en data.json + archivo .md)
+```
+
+**Preservación de `historias[].specs[]`:**
+- `scripts/consolidate-sprint.js` preserva automáticamente el array `specs[]` de la versión previa de `data.json` cuando se regenera (aplica en `--iteracion` y `--consolidar`).
+- El orchestrator NO necesita hacer nada especial: basta con que el consolidador vea la `data.json` previa; ella contiene los specs embebidos del flujo anterior.
+- En `mode=iteracion`, los specs generados para HUs que **siguen aprobadas** se preservan; si una HU fue re-analizada, sus specs previos se mantienen hasta que el PM solicite regenerarlos con `/generar-specs --hu <id>`.
+
+**Output secundario (fuera de `output/`):**
+- Specs ASDD: `specs/<sprint-id>/<hu-id>-v<N>.spec.md` (archivos .md inmutables por versión).
+- El orchestrator no toca esta carpeta; la genera el agente `spec-writer` invocado por el skill `generar-specs`.
 
 ---
 

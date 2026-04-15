@@ -181,7 +181,7 @@ Al completar la generación (del lote o de una HU):
 [RR·CKPT] Specs listos · <N> BORRADORES · 0 APROBADOS
 ```
 
-Seguido del bloque de `next-step.js` que ahora detecta `has_specs` en data.json.
+Al finalizar, ejecutar `bash: node scripts/next-step.js <sprint-id>` para que el PM vea automáticamente el siguiente paso (revisar specs, iterar, o cerrar el sprint si todos están APROBADO). El script ya detecta `historias[].specs[]` y distingue casos 7 (sin specs), 7.5 (borrador), 8 (todo completo).
 
 ---
 

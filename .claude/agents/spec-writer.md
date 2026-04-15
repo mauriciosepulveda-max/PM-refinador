@@ -37,6 +37,8 @@ docs/contexto/contexto-tecnico.md              # Stack, arquitectura, convencion
 specs/<sprint-id>/                             # Specs existentes (si hay iteraciones previas)
 ```
 
+> **Nota:** no hay template externo para el spec. La estructura se define íntegramente en esta guía (sección "Estructura del Spec ASDD"). Si necesitas un ejemplo de referencia, mira un `spec.md` existente en `specs/<sprint>/` de iteraciones previas.
+
 ---
 
 ## Definition of Ready (DoR) — Validar antes de generar
