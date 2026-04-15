@@ -5,7 +5,7 @@
 **STRATEGY:** Planning Mode. El desarrollo se hará por fases iterativas, requiriendo un plan de implementación detallado para cada componente del sistema.
 
 ## 2. CONTEXT & SURFACES
-**CONTEXT:** El proyecto se llama "Requirement Refinator V1". Se encargará de apoyar a gerentes de proyectos en el refinamiento y estimación de historias de usuario, basándose en el contexto histórico funcional y técnico de la solución. El entregable inicial será un documento HTML interactivo. Este HTML incluirá historias de usuario refinadas, Criterios de Aceptación en Gherkin, tareas técnicas (estimadas en tiempo), dependencias, riesgos, campos de feedback y preguntas para completar información. Tendrá un botón para exportar a PDF (incluyendo comentarios). Una segunda fase generará un informe de confirmación al cliente, y una tercera fase generará specs SDD con proceso HITL. La herramienta se alimentará con datos de Google Sheets (estructura a definir). La base de diseño es el "Documento de Priming UI/UX: Playbook Sofka BU1". El proyecto se ubicará en `/Users/mauricio-macmini/Documents/PROYECTOS PERSONALES/Requirement Refinator V1`.
+**CONTEXT:** El proyecto se llama "Requirement Refinator V1". Se encargará de apoyar a gerentes de proyectos en el refinamiento y estimación de historias de usuario, basándose en el contexto histórico funcional y técnico de la solución. El entregable inicial será un documento HTML interactivo. Este HTML incluirá historias de usuario refinadas, Criterios de Aceptación en Gherkin, tareas técnicas (estimadas en tiempo), dependencias, riesgos, campos de feedback y preguntas para completar información. Tendrá un botón para exportar a PDF (incluyendo comentarios). Una segunda fase generará un informe de confirmación al cliente, y una tercera fase generará specs SDD con proceso HITL. La herramienta se alimentará con datos de Google Sheets (estructura a definir). La base de diseño es el "Documento de Priming UI/UX: Playbook Sofka BU1". El proyecto se ubica en la raíz del repositorio clonado.
 **SURFACES:**
 -   **Editor:** Lectura/Escritura de HTML, CSS, JS, Markdown, Google App Script.
 -   **Terminal:** Para posibles herramientas de construcción o verificación de código (Antigravity).
@@ -14,7 +14,7 @@
 ## 3. THE MISSION (Pasos Secuenciales - Implementación del Plan)
 1.  **Internalizar Documentación Base y de Diseño:**
     *   Leer y comprender el "Documento de Priming UI/UX: Playbook Sofka BU1" para aplicar estrictamente sus reglas visuales y estructurales.
-    *   (Referencia a `/Users/mauricio-macmini/Documents/MetodologIA Taller/jm-agentic-development-kit/CONSTITUTION.md` y `FRAMEWORK-PRINCIPLES.md` para contexto general de agentes).
+    *   (Referencia al JM Agentic Development Kit — `CONSTITUTION.md` y `FRAMEWORK-PRINCIPLES.md` — para contexto general de agentes).
 2.  **Definición de Skills Internas del Agente (para el "Requirement Refinator V1"):**
     *   **Skill: `user-story-refiner`:** Diseñar esta skill para tomar historias de usuario y contexto, y generar historias refinadas con Gherkin, tareas, estimaciones, dependencias y riesgos.
     *   **Skill: `html-report-generator`:** Diseñar esta skill para tomar la salida estructurada de `user-story-refiner` y generar el HTML interactivo del dashboard de refinamiento, aplicando el diseño Sofka.

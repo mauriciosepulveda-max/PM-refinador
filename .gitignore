@@ -1,24 +1,64 @@
-# ── Outputs generados (no se versiona el contenido de cliente) ──
+# ══════════════════════════════════════════════════════════════
+# Requirement Refinator — .gitignore
+# El repo solo debe versionar el framework; los artefactos de uso
+# (HUs reales, contextos del cliente, outputs del dashboard, specs
+# generados) NUNCA deben subirse a GitHub.
+# ══════════════════════════════════════════════════════════════
+
+# ── Outputs generados (dashboard, data.json, tmp/ intermedios, checkpoints) ──
 output/
 
+# ── Specs ASDD generados por /generar-specs (versionados en el cliente, no en el framework) ──
+specs/
+
 # ── Contexto real de proyectos (el PM pone el suyo, nunca se versiona) ──
-# Bloquea cualquier .md que no sea README o .template
+# Solo README y templates quedan en git. El resto es del cliente.
 docs/contexto/*.md
 !docs/contexto/README.md
 !docs/contexto/*.template.md
 
-# ── HUs reales de proyectos ──
+# ── HUs reales de proyectos (una carpeta por sprint real) ──
+# Solo el README y los _fixtures (sintéticos) se versionan.
 docs/HUs/Sprint-*/
 !docs/HUs/README.md
+!docs/HUs/_fixtures/
+
+# ── Git worktrees locales (NO son parte del proyecto; solo estado de desarrollo) ──
+.claude/worktrees/
+
+# ── Carpetas temporales genéricas ──
+**/tmp/
+**/.tmp/
+*.tmp
+*.tmp.*
 
 # ── Sistema operativo ──
 .DS_Store
 Thumbs.db
+*.swp
 
 # ── IDEs ──
 .vscode/
 .idea/
-*.swp
+*.sublime-*
 
-# ── Node ──
+# ── Node / dependencias ──
 node_modules/
+package-lock.json
+yarn.lock
+.npm/
+
+# ── Logs y credenciales (defensa en profundidad) ──
+*.log
+.env
+.env.*
+!.env.template
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# ── Archivos de respaldo manual ──
+*.bak
+*.backup
+*~

@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/scripts/watchdog-empty-turn.js"
+          }
+        ]
+      }
+    ]
+  },
+  "_notes": [
+    "Hook Stop intenta detectar turnos del asistente que cierran vacíos.",
+    "Si el runtime no expone transcript al hook, el watchdog simplemente sale 0 (no bloquea).",
+    "La defensa principal anti-tokenburn es la regla [RR·PAUSE] en CLAUDE.md, no este hook."
+  ]
+}

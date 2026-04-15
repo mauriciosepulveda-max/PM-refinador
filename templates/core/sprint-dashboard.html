@@ -327,8 +327,16 @@ main{flex:1;padding:var(--space-6);max-width:var(--max-w);margin:0 auto;width:10
 .sprint-dates-bar{display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:flex-end;padding:var(--space-3);background:var(--rr-orange-light);border:1px solid var(--rr-orange-border);border-radius:var(--radius-md);margin-bottom:var(--space-3)}
 .date-field{display:flex;flex-direction:column;gap:.25rem;min-width:170px}
 .date-field label{font-size:.7rem;font-weight:700;color:rgba(255,126,8,.9);text-transform:uppercase;letter-spacing:.3px}
-.date-field input[type="date"]{font-family:var(--font-body);font-size:.86rem;padding:.45rem .6rem;border:1px solid var(--rr-orange-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text)}
-.date-field input[type="date"]:focus{outline:2px solid var(--rr-orange);outline-offset:1px}
+/* Componente de fecha híbrido: text input editable + botón visible que abre calendario nativo */
+.datepick{display:flex;gap:.3rem;align-items:center;position:relative;flex-wrap:nowrap}
+.datepick-txt{flex:1;min-width:120px;font-family:var(--font-mono);font-size:.86rem;padding:.45rem .6rem;border:1px solid var(--rr-orange-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);letter-spacing:.5px}
+.datepick-txt:focus{outline:2px solid var(--rr-orange);outline-offset:1px;border-color:var(--rr-orange)}
+.datepick-txt.datepick-invalid{border-color:#DC2626 !important;box-shadow:0 0 0 2px rgba(220,38,38,.2)}
+.datepick-btn{flex-shrink:0;padding:.38rem .6rem;border:1px solid var(--rr-orange);border-radius:var(--radius-sm);background:rgba(255,126,8,.15);color:var(--rr-orange);font-size:1rem;cursor:pointer;line-height:1;transition:background .15s,color .15s}
+.datepick-btn:hover{background:var(--rr-orange);color:#000}
+.datepick-btn:focus{outline:2px solid var(--rr-orange);outline-offset:2px}
+.datepick-hidden{position:absolute;left:-9999px;top:-9999px;width:0;height:0;opacity:0;pointer-events:none}
+input[type="date"]{color-scheme:dark}
 
 /* ── Chart + Gantt ───────────────────────────────────── */
 .chart-wrap{position:relative;height:320px;width:100%;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:var(--space-4)}
@@ -616,6 +624,7 @@ main{flex:1;padding:var(--space-6);max-width:var(--max-w);margin:0 auto;width:10
       <button class="sub-tab active" data-sub="evm">💰 EVM</button>
       <button class="sub-tab" data-sub="gantt">📅 Cronograma</button>
       <button class="sub-tab" data-sub="riesgos">⚠️ Radar de Riesgos</button>
+      <button class="sub-tab" data-sub="specs">📄 Specs</button>
     </div>
 
     <div id="progress-content"></div>
@@ -879,7 +888,8 @@ indica "No documentado — requiere confirmación del equipo".</pre>
   const UNIT_KEY  = 'rr_evm_unit_' + SPRINT_ID;
   const DATES_KEY = 'rr_dates_' + SPRINT_ID;
   const BAC_KEY     = 'rr_bac_'     + SPRINT_ID; // legacy (horas)
-  const BAC_COP_KEY = 'rr_bac_cop_' + SPRINT_ID; // nuevo (COP)
+  const BAC_COP_KEY = 'rr_bac_cop_' + SPRINT_ID; // override global (COP)
+  const BAC_HU_KEY  = 'rr_bac_hu_'  + SPRINT_ID; // overrides por HU (COP) — {hu_id: cop}
   const CAP_KEY     = 'rr_cap_'     + SPRINT_ID; // capacidad del equipo
   const STATE_VERSION = '1.2';
   const HOURLY_RATE = 80000;
@@ -901,8 +911,41 @@ indica "No documentado — requiere confirmación del equipo".</pre>
   // legacy stubs (used in applyStatePayload backward compat)
   function loadCustomBacH(){ const v=localStorage.getItem(BAC_KEY); return v!=null?+v:null; }
   function saveCustomBacH(v){ if(v>0){localStorage.setItem(BAC_KEY,String(v));markDirty();}else{localStorage.removeItem(BAC_KEY);} }
+  // BAC override por HU (en COP). Si una HU tiene override, su BAC se sobreescribe; la suma total se recalcula.
+  function loadCustomBacHU(){
+    try{
+      const r=JSON.parse(localStorage.getItem(BAC_HU_KEY)||'{}')||{};
+      const clean={};
+      Object.entries(r).forEach(([huId,cop])=>{
+        if(sanitizeHuId(huId)){
+          const money=sanitizeMoney(cop);
+          if(money>0) clean[huId]=money;
+        }
+      });
+      if(JSON.stringify(r)!==JSON.stringify(clean)) localStorage.setItem(BAC_HU_KEY,JSON.stringify(clean));
+      return clean;
+    }catch(e){return{};}
+  }
+  function saveCustomBacHU(map){ localStorage.setItem(BAC_HU_KEY,JSON.stringify(map||{})); markDirty(); }
+  function getCustomBacHU(huId){ const m=loadCustomBacHU(); return m[huId]; }
+  function setCustomBacHU(huId,cop){ const m=loadCustomBacHU(); if(cop!=null&&+cop>0){m[huId]=+cop;}else{delete m[huId];} saveCustomBacHU(m); }
   // Capacity helpers
-  function loadCap(){ try{return JSON.parse(localStorage.getItem(CAP_KEY)||'{}');}catch(e){return{};} }
+  function loadCap(){
+    try{
+      const r=JSON.parse(localStorage.getItem(CAP_KEY)||'{}');
+      // Sanear: horas_eventos debe ser número no-negativo; roles debe ser array de {rol, personas}
+      const clean={};
+      if(r&&typeof r==='object'){
+        if(r.horas_eventos!=null) clean.horas_eventos=sanitizeNumberInRange(r.horas_eventos,0,1000,0);
+        if(Array.isArray(r.roles)){
+          clean.roles=r.roles.filter(x=>x&&typeof x.rol==='string'&&/^[A-Z]{2,8}$/.test(x.rol))
+            .map(x=>({rol:x.rol,personas:sanitizeNumberInRange(x.personas,0,50,0)}));
+        }
+      }
+      if(JSON.stringify(r)!==JSON.stringify(clean)) localStorage.setItem(CAP_KEY,JSON.stringify(clean));
+      return clean;
+    }catch(e){return{};}
+  }
   function saveCap(o){ localStorage.setItem(CAP_KEY,JSON.stringify(o||{})); markDirty(); }
   function toUnit(cop){
     const u=loadUnit();
@@ -924,10 +967,55 @@ indica "No documentado — requiere confirmación del equipo".</pre>
     if(v>=1e6)return'$'+(v/1e6).toFixed(1)+'M'; if(v>=1e3)return'$'+(v/1e3).toFixed(0)+'K'; return'$'+Math.round(v);
   }
 
+  // ── Sanitizers generalizados (Ola 2 · A4) ──────────────
+  // Rechaza o clamp-ea inputs inválidos que podrían venir de:
+  //   · localStorage de versiones previas con bugs conocidos
+  //   · imports de Markdown con round-trip incompleto
+  //   · manipulación manual del JSON por un PM avanzado
+  // Todos retornan un valor seguro o null/0 según corresponda.
+  function sanitizeNumberInRange(n,min,max,fallback){
+    const v=+n; if(!isFinite(v)) return (fallback!=null?fallback:null);
+    if(v<min) return min; if(v>max) return max; return v;
+  }
+  function sanitizeMoney(n){ const v=+n; if(!isFinite(v)||v<0) return 0; return v; }
+  function sanitizeHuId(s){ if(!s||typeof s!=='string') return null; return /^[A-Za-z0-9][A-Za-z0-9_\-.]{0,63}$/.test(s)?s:null; }
+  function sanitizeSnapshot(s){
+    if(!s||typeof s!=='object') return null;
+    const fecha=sanitizeISODate(s.fecha);
+    if(!fecha) return null;
+    return{
+      fecha,
+      pv:sanitizeMoney(s.pv),
+      ev:sanitizeMoney(s.ev),
+      ac:sanitizeMoney(s.ac),
+      cpi:isFinite(+s.cpi)?+s.cpi:0,
+      spi:isFinite(+s.spi)?+s.spi:0,
+      notas:typeof s.notas==='string'?s.notas:'',
+      registrado_en:typeof s.registrado_en==='string'?s.registrado_en:new Date().toISOString(),
+    };
+  }
   // ── Date helpers ───────────────────────────────────────
-  function loadDates(){ try{return JSON.parse(localStorage.getItem(DATES_KEY))||{};}catch(e){return{};} }
+  // Sanea fechas persistidas de versiones previas con bug de año (ej. "0002-04-15")
+  function sanitizeISODate(s){
+    if(!s||typeof s!=='string') return null;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const y=+s.slice(0,4), m=+s.slice(5,7), d=+s.slice(8,10);
+    if(y<2020||y>2035||m<1||m>12||d<1||d>31) return null;
+    return s;
+  }
+  function loadDates(){
+    try{
+      const raw=JSON.parse(localStorage.getItem(DATES_KEY))||{};
+      const clean={};
+      const s=sanitizeISODate(raw.start); if(s) clean.start=s;
+      const e=sanitizeISODate(raw.end);   if(e) clean.end=e;
+      // Si había fechas inválidas, persistir la versión limpia (self-heal)
+      if(JSON.stringify(raw)!==JSON.stringify(clean)) localStorage.setItem(DATES_KEY,JSON.stringify(clean));
+      return clean;
+    }catch(e){return{};}
+  }
   function saveDates(o){ localStorage.setItem(DATES_KEY,JSON.stringify(o||{})); markDirty(); }
-  function parseISODate(s){ if(!s)return null; const[y,m,dd]=String(s).split('-').map(Number); if(!y||!m||!dd)return null; return new Date(y,m-1,dd); }
+  function parseISODate(s){ const ok=sanitizeISODate(s); if(!ok) return null; const[y,m,dd]=ok.split('-').map(Number); return new Date(y,m-1,dd); }
   function toISODate(d){ if(!d)return''; const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); return y+'-'+m+'-'+dd; }
   function isWeekend(d){ const wd=d.getDay(); return wd===0||wd===6; }
   function addBusinessDays(start,n){ if(!start)return null; const d=new Date(start.getTime()); let count=0; while(isNonWorkDay(d))d.setDate(d.getDate()+1); count=1; while(count<n){d.setDate(d.getDate()+1);if(!isNonWorkDay(d))count++;} return d; }
@@ -970,7 +1058,37 @@ indica "No documentado — requiere confirmación del equipo".</pre>
   function loadState(){ try{return JSON.parse(localStorage.getItem(LS_KEY))||{};}catch(e){return{};} }
   function saveState(s){ localStorage.setItem(LS_KEY,JSON.stringify(s)); markDirty(); }
   function huState(id){ const s=loadState(); if(!s[id])s[id]={status:'pendiente',feedback:'',answers:{},pert:{},risks:{}}; return s[id]; }
-  function loadEvm(){ try{const r=JSON.parse(localStorage.getItem(EVM_KEY)||'{}');r.snapshots=r.snapshots||[];r.per_hu=r.per_hu||{};return r;}catch(e){return{snapshots:[],per_hu:{}}; } }
+  function loadEvm(){
+    try{
+      const r=JSON.parse(localStorage.getItem(EVM_KEY)||'{}');
+      // Sanear snapshots: descartar los que tengan fecha bogus o valores no-numéricos
+      const rawSnaps=Array.isArray(r.snapshots)?r.snapshots:[];
+      const cleanSnaps=rawSnaps.map(sanitizeSnapshot).filter(Boolean);
+      // Sanear per_hu: PV/EV/AC deben ser números ≥ 0; hu_id debe pasar regex
+      const rawPerHu=(r.per_hu&&typeof r.per_hu==='object')?r.per_hu:{};
+      const cleanPerHu={};
+      Object.entries(rawPerHu).forEach(([huId,vals])=>{
+        if(!sanitizeHuId(huId)||!vals||typeof vals!=='object') return;
+        cleanPerHu[huId]={
+          pv:sanitizeMoney(vals.pv),
+          ev:sanitizeMoney(vals.ev),
+          ac:sanitizeMoney(vals.ac),
+        };
+      });
+      // Sanear per_hu_snapshots: diccionario hu_id → array de snapshots
+      const rawPerHuSnaps=(r.per_hu_snapshots&&typeof r.per_hu_snapshots==='object')?r.per_hu_snapshots:{};
+      const cleanPerHuSnaps={};
+      Object.entries(rawPerHuSnaps).forEach(([huId,arr])=>{
+        if(!sanitizeHuId(huId)||!Array.isArray(arr)) return;
+        const cleanArr=arr.map(sanitizeSnapshot).filter(Boolean);
+        if(cleanArr.length) cleanPerHuSnaps[huId]=cleanArr;
+      });
+      const clean={snapshots:cleanSnaps,per_hu:cleanPerHu,per_hu_snapshots:cleanPerHuSnaps};
+      // Self-heal: si había datos inválidos, persistir la versión limpia
+      if(JSON.stringify(r)!==JSON.stringify(clean)) localStorage.setItem(EVM_KEY,JSON.stringify(clean));
+      return clean;
+    }catch(e){return{snapshots:[],per_hu:{},per_hu_snapshots:{}};}
+  }
   function saveEvm(e){ localStorage.setItem(EVM_KEY,JSON.stringify(e)); markDirty(); }
   function updateHu(id,patch){ const s=loadState(); s[id]=Object.assign({status:'pendiente',feedback:'',answers:{},pert:{},risks:{}},s[id]||{},patch); saveState(s); }
 
@@ -1159,7 +1277,7 @@ indica "No documentado — requiere confirmación del equipo".</pre>
         '<strong>Registrar medición</strong> — guarda un snapshot al cierre de cada día o mínimo 2 veces/semana.',
         '<strong>Cronograma</strong> — Gantt de ruta crítica. Declara las fechas del sprint para ver el calendario real.',
         '<strong>Riesgos</strong> — radar RISICAR del sprint. Los riesgos Crítico/Inaceptable requieren acción inmediata.',
-        '<strong>Bitácora PMO</strong> — usa el botón al final de la sección EVM para generar automáticamente el informe semanal en formato .md.'
+        '<strong>Bitácora PMO</strong> — al final de la sección EVM encuentras botones para descargar el informe semanal como PDF o Word (.doc), listos para compartir con el cliente o PMO.'
       ]
     }
   };
@@ -1516,6 +1634,7 @@ indica "No documentado — requiere confirmación del equipo".</pre>
     const state=loadState();
     const hpd=cfg.horasDia||8;
     let totalH=0;
+    const customBacMap=loadCustomBacHU();
     const baseline=historias.map(h=>{
       const pertState=(state[h.hu_id]||{}).pert||{};
       // Use PERT-adjusted distribution when available, fall back to static
@@ -1528,9 +1647,13 @@ indica "No documentado — requiere confirmación del equipo".</pre>
       const dias=roleVals.length?Math.max(1,Math.max(...roleVals.map(v=>Math.ceil(+v/hpd)))):Math.max(1,Math.ceil(horas/hpd));
       const diasPorRol={};
       Object.entries(dist).forEach(([rol,hrs])=>{if(+hrs>0)diasPorRol[rol]=Math.ceil(+hrs/hpd);});
-      return{hu_id:h.hu_id,titulo:h.titulo_mejorado||h.titulo_original||h.hu_id,horas,bac:horas*HOURLY_RATE,pv:horas*HOURLY_RATE,cal:h.calificacion_iso||0,deps:(h.dependencias||[]).map(d=>d.referencia).filter(Boolean),riesgos_alta:(h.riesgos||[]).filter(r=>(+r.nivel_riesgo_valor||0)>=10).length,dias,dist,diasPorRol};
+      const bacPert=horas*HOURLY_RATE;
+      const bacOv=customBacMap[h.hu_id];
+      const bacEff=(bacOv!=null&&+bacOv>0)?+bacOv:bacPert;
+      return{hu_id:h.hu_id,titulo:h.titulo_mejorado||h.titulo_original||h.hu_id,horas,bac:bacEff,bac_pert:bacPert,bac_override:(bacOv!=null&&+bacOv>0)?+bacOv:null,pv:bacEff,cal:h.calificacion_iso||0,deps:(h.dependencias||[]).map(d=>d.referencia).filter(Boolean),riesgos_alta:(h.riesgos||[]).filter(r=>(+r.nivel_riesgo_valor||0)>=10).length,dias,dist,diasPorRol};
     });
-    return{cfg,totalH,baseline,bac_total:totalH*HOURLY_RATE};
+    const bacTotalFromHus=baseline.reduce((a,b)=>a+(+b.bac||0),0);
+    return{cfg,totalH,baseline,bac_total:bacTotalFromHus};
   }
 
   // ── AI Accelerator helper ──────────────────────────────
@@ -1571,14 +1694,101 @@ indica "No documentado — requiere confirmación del equipo".</pre>
     });
   }
 
+  // ── Render Specs Panel (Tab 4 de Avance del Sprint · Ola 4 ASDD) ──
+  // Tres estados visibles según progreso del sprint:
+  //   1. < 100% HUs aprobadas → callout informativo, esperando aprobación
+  //   2. 100% aprobadas, sin specs generados → invitación a ejecutar /generar-specs
+  //   3. Specs generados → tabla con HU + versión + estado + botón de descarga
+  function renderSpecsPanel(){
+    const historias=(D&&D.historias)||[];
+    const total=historias.length;
+    const aprobadas=historias.filter(h=>h.pm_aprobada===true).length;
+    const huConSpecs=historias.filter(h=>Array.isArray(h.specs)&&h.specs.length>0);
+    const totalSpecs=huConSpecs.reduce((a,h)=>a+h.specs.length,0);
+    const aprobadosSpecs=huConSpecs.reduce((a,h)=>a+h.specs.filter(s=>String(s.estado||'').toUpperCase()==='APROBADO').length,0);
+
+    const headerHtml=
+      '<div class="card"><h2>📄 Specs ASDD <span class="ux-tip" data-tip="Especificaciones técnicas siguiendo el marco Agentic Spec-Driven Development (ASDD) de Sofka. Cada spec es un contrato ejecutable para que Backend, Frontend y QA puedan implementar sin ambigüedad.">?</span></h2>'+
+      '<p style="font-size:.84rem;color:var(--color-text-muted);margin-bottom:var(--space-3)">Pipeline ASDD: Clasificación → Evaluación → Completitud → Análisis QUÉ/DÓNDE/POR QUÉ → Delegación. Specs versionados con Gate 0 obligatorio antes de APROBADO.</p>';
+
+    // Estado 1 — sin todas las HUs aprobadas
+    if(total===0){
+      return headerHtml+'<p style="color:var(--color-text-muted);font-style:italic">Sin historias en el sprint.</p></div>';
+    }
+    if(aprobadas<total){
+      const faltantes=total-aprobadas;
+      return headerHtml+
+        '<div style="padding:var(--space-4);background:rgba(217,119,6,.1);border-left:3px solid #D97706;border-radius:var(--radius-md);font-size:.88rem">'+
+          '<strong style="color:#D97706">⏳ Specs aún no disponibles</strong><br>'+
+          '<span style="color:var(--color-text-muted)">Faltan <strong>'+faltantes+'</strong> HU(s) por aprobar (avance: '+aprobadas+'/'+total+'). Una vez todas estén aprobadas en la tab "Dashboard Sprint", podrás generar los specs ASDD aquí.</span>'+
+        '</div></div>';
+    }
+
+    // Estado 2 — todas aprobadas, sin specs
+    if(totalSpecs===0){
+      return headerHtml+
+        '<div style="padding:var(--space-4);background:rgba(22,163,74,.08);border-left:3px solid #16A34A;border-radius:var(--radius-md);font-size:.88rem;margin-bottom:var(--space-3)">'+
+          '<strong style="color:#16A34A">✅ '+total+'/'+total+' HUs aprobadas — listo para generar specs</strong>'+
+        '</div>'+
+        '<div style="padding:var(--space-4);background:var(--color-surface-2);border:1px solid var(--color-border);border-radius:var(--radius-md);font-family:var(--font-mono);font-size:.86rem">'+
+          '<div style="font-size:.7rem;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.4rem">▸ Para generar el primer borrador de los specs, ejecuta en Claude:</div>'+
+          '<div style="background:#000;color:#FF7E08;padding:var(--space-3);border-radius:var(--radius-sm);font-weight:700;font-size:1rem">/generar-specs '+esc((D&&D.meta&&D.meta.sprint_id)||'Sprint-X')+'</div>'+
+          '<div style="font-size:.78rem;color:var(--color-text-muted);margin-top:.6rem;line-height:1.5">El comando ejecuta el pipeline ASDD por cada HU aprobada, genera un .spec.md versionado por HU y los embebe en este dashboard. Aparecerán aquí mismo con un botón de descarga.</div>'+
+        '</div></div>';
+    }
+
+    // Estado 3 — specs generados, render tabla con descarga
+    let rowsHtml='';
+    historias.forEach(h=>{
+      const specs=Array.isArray(h.specs)?h.specs:[];
+      const last=specs.length?specs[specs.length-1]:null;
+      const estado=last?(String(last.estado||'BORRADOR').toUpperCase()):'(sin spec)';
+      const estadoCls=estado==='APROBADO'?'badge-green':estado==='EN_REVISION'?'badge-orange':estado==='BORRADOR'?'badge-gray':'badge-gray';
+      const ver=last?(last.version||(specs.length+'.0')):'—';
+      const gate0=last&&last.gate_0_passed?'✓':'⚠';
+      const fecha=last?(String(last.creado||'').slice(0,10)):'—';
+      const downloadBtn=last
+        ? '<button type="button" class="btn-spec-dl" data-hu="'+esc(h.hu_id)+'" data-ver="'+esc(ver)+'" title="Descargar '+esc(h.hu_id)+'-v'+esc(ver)+'.spec.md" style="padding:4px 12px;font-size:.78rem;border:1px solid var(--rr-orange);border-radius:4px;background:rgba(255,126,8,.15);color:var(--rr-orange);font-weight:700;cursor:pointer">⬇ .md</button>'
+        : '<span style="color:var(--color-text-muted);font-size:.76rem">—</span>';
+      rowsHtml+='<tr>'+
+        '<td><strong>'+esc(h.hu_id)+'</strong><br><span style="color:var(--color-text-muted);font-size:.7rem">'+esc(h.titulo_mejorado||h.titulo_original||'').slice(0,50)+'</span></td>'+
+        '<td style="text-align:center"><span class="hu-id">v'+esc(ver)+'</span></td>'+
+        '<td><span class="badge '+estadoCls+'">'+esc(estado)+'</span></td>'+
+        '<td style="text-align:center;font-size:1.1rem" title="Gate 0 (validación estructural + completitud + CoE)">'+gate0+'</td>'+
+        '<td style="font-size:.78rem;color:var(--color-text-muted)">'+esc(fecha)+'</td>'+
+        '<td style="text-align:center">'+(specs.length>1?'<span class="hu-id" title="Iteraciones previas">'+specs.length+'×</span>':'<span style="color:var(--color-text-muted);font-size:.76rem">1×</span>')+'</td>'+
+        '<td style="text-align:center">'+downloadBtn+'</td>'+
+      '</tr>';
+    });
+    const summary=
+      '<div style="display:flex;gap:var(--space-3);margin-bottom:var(--space-3);flex-wrap:wrap">'+
+        '<div class="kpi" style="flex:1;min-width:140px"><div class="kpi-label">HUs con spec</div><div class="kpi-value">'+huConSpecs.length+' / '+total+'</div></div>'+
+        '<div class="kpi" style="flex:1;min-width:140px"><div class="kpi-label">Aprobados</div><div class="kpi-value" style="color:'+(aprobadosSpecs===totalSpecs?'#16A34A':'#D97706')+'">'+aprobadosSpecs+' / '+totalSpecs+'</div></div>'+
+        '<div class="kpi" style="flex:1;min-width:140px"><div class="kpi-label">Total versiones</div><div class="kpi-value">'+totalSpecs+'</div></div>'+
+      '</div>';
+    return headerHtml+summary+
+      '<div style="overflow-x:auto"><table class="evm-table"><thead><tr>'+
+        '<th>Historia</th>'+
+        '<th>Versión</th>'+
+        '<th>Estado</th>'+
+        '<th>Gate 0 <span class="ux-tip" data-tip="Validación estructural + completitud + cumplimiento mínimo de CoE. Obligatoria antes de APROBADO.">?</span></th>'+
+        '<th>Creado</th>'+
+        '<th>Iteraciones <span class="ux-tip" data-tip="Cantidad de versiones de este spec (cada iteración es archivo nuevo, inmutable).">?</span></th>'+
+        '<th>Descargar</th>'+
+      '</tr></thead><tbody>'+rowsHtml+'</tbody></table></div>'+
+      '<p style="font-size:.78rem;color:var(--color-text-muted);margin-top:var(--space-3);font-style:italic">Para iterar un spec con feedback: <code style="background:var(--color-surface);padding:2px 6px;border-radius:3px">/generar-specs '+esc((D&&D.meta&&D.meta.sprint_id)||'Sprint-X')+' --iterar &lt;hu-id&gt;</code></p>'+
+      '</div>';
+  }
+
   // ── Render Progress ────────────────────────────────────
   function renderProgress(){
     if(!D||!D.historias){renderEmpty();return;}
-    const{cfg,totalH,baseline,bac_total:bac_pert}=computeBaseline();
-    // Apply custom BAC (user-editable, stored in COP) over PERT-derived value
+    const{cfg,totalH,baseline,bac_total:bac_from_hus}=computeBaseline();
+    // Override global de BAC (si existe, gana sobre la suma por HU)
     const customBacCOP=loadCustomBacCOP();
-    const bac_total=customBacCOP!=null?customBacCOP:(totalH*HOURLY_RATE);
+    const bac_total=customBacCOP!=null?customBacCOP:bac_from_hus;
     const effectiveTotalH=bac_total/HOURLY_RATE; // for display in hints
+    const anyHuOverride=baseline.some(b=>b.bac_override!=null);
 
     const evm=loadEvm();
     const state=loadState();
@@ -1650,12 +1860,74 @@ indica "No documentado — requiere confirmación del equipo".</pre>
     // Known roles in PERT but not declared
     const missingRols=Object.keys(pertByRol).filter(r=>!declaredRols.includes(r));
 
+    // ── Detección "sprint cerrable" (Ola 3 · U4) ──
+    // Condiciones AND: 100% HUs aprobadas · última medición EV/BAC ≥ 0.95 · sin riesgos Inaceptables abiertos.
+    // Fecha fin del sprint no es bloqueante (permite cerrar antes si el trabajo se completa).
+    let closableBannerHtml='';
+    try{
+      const historias=(D&&D.historias)||[];
+      const approvedCount=historias.filter(h=>h.pm_aprobada===true).length;
+      const allApproved=historias.length>0 && approvedCount===historias.length;
+      const lastSnap=snaps.length?snaps[snaps.length-1]:null;
+      const evPct=(lastSnap && bac_total>0)?(+lastSnap.ev||0)/bac_total:0;
+      const evmReady=evPct>=0.95;
+      const stateHu=loadState();
+      let inaceptablesAbiertos=0;
+      historias.forEach(h=>{
+        const rSt=(stateHu[h.hu_id]||{}).risks||{};
+        (h.riesgos||[]).forEach(r=>{
+          const entry=rSt[r.riesgo_id]||{};
+          const cerrado=entry.cerrado!=null?entry.cerrado:(r.estado===1);
+          if(cerrado) return;
+          const label=String(r.nivel_riesgo_label||'').toLowerCase();
+          const val=+r.nivel_riesgo_valor||0;
+          if(label.indexOf('inacept')>=0 || val>=15) inaceptablesAbiertos++;
+        });
+      });
+      if(allApproved && evmReady && inaceptablesAbiertos===0){
+        closableBannerHtml=
+          '<div style="margin:0 0 var(--space-4) 0;padding:var(--space-4) var(--space-5);background:linear-gradient(135deg,rgba(22,163,74,.15),rgba(22,163,74,.05));border:1px solid #16A34A;border-left:4px solid #16A34A;border-radius:var(--radius-md);display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap">'+
+            '<div style="font-size:2rem;line-height:1">✅</div>'+
+            '<div style="flex:1;min-width:240px">'+
+              '<div style="font-weight:700;color:#16A34A;font-size:1rem">Sprint listo para cierre formal</div>'+
+              '<div style="font-size:.82rem;color:var(--color-text-muted);margin-top:.2rem">'+
+                approvedCount+'/'+historias.length+' HUs aprobadas · '+
+                'EV '+(evPct*100).toFixed(0)+'% del BAC · '+
+                '0 riesgos Inaceptables abiertos.'+
+              '</div>'+
+            '</div>'+
+            '<div style="font-size:.8rem;color:var(--color-text-muted);text-align:right">→ Genera la Bitácora PMO (PDF o Word) con los botones en la sección EVM para compartir con el cliente.</div>'+
+          '</div>';
+      } else if(allApproved && historias.length>0){
+        // Sprint con HUs aprobadas pero no cerrable todavía — pista de qué falta
+        const blockers=[];
+        if(!evmReady) blockers.push('EV < 95% del BAC ('+((evPct*100).toFixed(0))+'%)');
+        if(inaceptablesAbiertos>0) blockers.push(inaceptablesAbiertos+' riesgo(s) Inaceptable(s) abierto(s)');
+        closableBannerHtml=
+          '<div style="margin:0 0 var(--space-4) 0;padding:var(--space-3) var(--space-4);background:rgba(217,119,6,.1);border-left:3px solid #D97706;border-radius:var(--radius-sm);font-size:.82rem;color:var(--color-text)">'+
+            '<strong style="color:#D97706">🟡 Sprint casi listo para cierre</strong> — falta: '+blockers.join(' · ')+'.'+
+          '</div>';
+      }
+    }catch(_e){ /* sin banner si falla la evaluación */ }
+
     // Sprint info
-    const sprintInfoHtml=
+    const sprintInfoHtml=closableBannerHtml+
       '<div class="card"><h2>📅 Datos del Sprint <span class="ux-tip" data-tip="Parámetros del sprint: fechas, capacidad y BAC.">?</span></h2>'+
       '<div class="sprint-dates-bar">'+
-        '<div class="date-field"><label>Inicio <span class="ux-tip" data-tip="Primer día hábil.">?</span></label><input type="date" id="sprint-date-start" value="'+esc(dates.start||'')+'"></div>'+
-        '<div class="date-field"><label>Fin <span class="ux-tip" data-tip="Último día hábil. Se autocompleta si está vacío.">?</span></label><input type="date" id="sprint-date-end" value="'+esc(dates.end||'')+'"></div>'+
+        '<div class="date-field"><label>Inicio <span class="ux-tip" data-tip="Primer día hábil. Formato YYYY-MM-DD o usa el calendario 📅">?</span></label>'+
+          '<div class="datepick">'+
+            '<input type="text" id="sprint-date-start" class="datepick-txt" placeholder="YYYY-MM-DD" maxlength="10" value="'+esc(dates.start||'')+'" aria-label="Fecha inicio formato YYYY-MM-DD">'+
+            '<button type="button" class="datepick-btn" data-pick-for="sprint-date-start" title="Abrir calendario" aria-label="Abrir calendario">📅</button>'+
+            '<input type="date" class="datepick-hidden" data-pick-hidden-for="sprint-date-start" min="2024-01-01" max="2030-12-31" tabindex="-1" aria-hidden="true">'+
+          '</div>'+
+        '</div>'+
+        '<div class="date-field"><label>Fin <span class="ux-tip" data-tip="Último día hábil. Se autocompleta si está vacío.">?</span></label>'+
+          '<div class="datepick">'+
+            '<input type="text" id="sprint-date-end" class="datepick-txt" placeholder="YYYY-MM-DD" maxlength="10" value="'+esc(dates.end||'')+'" aria-label="Fecha fin formato YYYY-MM-DD">'+
+            '<button type="button" class="datepick-btn" data-pick-for="sprint-date-end" title="Abrir calendario" aria-label="Abrir calendario">📅</button>'+
+            '<input type="date" class="datepick-hidden" data-pick-hidden-for="sprint-date-end" min="2024-01-01" max="2030-12-31" tabindex="-1" aria-hidden="true">'+
+          '</div>'+
+        '</div>'+
         '<div class="date-field"><label>&nbsp;</label><button type="button" class="btn btn-primary btn-sm" id="btn-autofill-end" data-tip="Calcula el fin del sprint excluyendo fines de semana y festivos Colombia">⚡ Auto ('+cfg.dias+' días)</button></div>'+
         '<div class="date-field"><label>&nbsp;</label><button type="button" class="btn btn-secondary btn-sm" id="btn-clear-dates" style="border-color:var(--rag-red);color:var(--rag-red)">🗑 Limpiar</button></div>'+
       '</div>'+
@@ -1762,12 +2034,23 @@ indica "No documentado — requiere confirmación del equipo".</pre>
       const estadoCls=ev===0?'badge-gray':(ev>=b.bac*0.99?'badge-green':'badge-orange');
       const pvU=toUnit(pv),evU=toUnit(ev),acU=toUnit(ac);
       const stepU=curUnit==='hours'?0.5:(curUnit==='usd'?10:10000);
+      const bacU=toUnit(b.bac);
+      const bacTitle=b.bac_override!=null
+        ? 'Override manual. PERT: '+fmtEvm(b.bac_pert)+'. Pon 0 para volver al PERT.'
+        : 'Editable. Al cambiar, actualiza la suma del BAC total del sprint.';
+      const bacCellStyle=b.bac_override!=null?'border:1px solid var(--rr-orange);':'';
+      const snapsHu=(evm.per_hu_snapshots&&evm.per_hu_snapshots[b.hu_id])||[];
+      const lastSnap=snapsHu.length?snapsHu[snapsHu.length-1]:null;
+      const snapBtnTitle=lastSnap
+        ? 'Último snapshot: '+esc(lastSnap.fecha)+' · '+snapsHu.length+' total(es). Clic para registrar otro con valores actuales de PV/EV/AC.'
+        : 'Captura el PV/EV/AC actual de esta HU con la fecha de hoy como snapshot histórico.';
       evmRowsHtml+='<tr>'+
         '<td title="'+esc(b.titulo)+'"><strong>'+esc(b.hu_id)+'</strong><br><span style="color:var(--color-text-muted);font-size:.66rem">'+esc(b.titulo).slice(0,40)+'</span></td>'+
-        '<td>'+fmtEvm(b.bac)+'</td>'+
+        '<td><input type="number" class="evm-input" data-hu="'+esc(b.hu_id)+'" data-k="bac" value="'+bacU.toFixed(curUnit==='hours'?1:0)+'" min="0" step="'+stepU+'" title="'+esc(bacTitle)+'" style="width:96px;'+bacCellStyle+'"></td>'+
         '<td><input type="number" class="evm-input" data-hu="'+esc(b.hu_id)+'" data-k="pv" value="'+pvU+'" min="0" step="'+stepU+'"></td>'+
         '<td><input type="number" class="evm-input" data-hu="'+esc(b.hu_id)+'" data-k="ev" value="'+evU+'" min="0" step="'+stepU+'"></td>'+
         '<td><input type="number" class="evm-input" data-hu="'+esc(b.hu_id)+'" data-k="ac" value="'+acU+'" min="0" step="'+stepU+'"></td>'+
+        '<td style="padding:0 4px"><button type="button" class="btn-snap-hu" data-hu="'+esc(b.hu_id)+'" title="'+esc(snapBtnTitle)+'" style="padding:2px 8px;font-size:.8rem;border:1px solid var(--color-border);border-radius:4px;background:var(--color-surface-2);color:var(--color-text);cursor:pointer">📸'+(snapsHu.length?'<sup style="font-size:.6rem;margin-left:.15rem;color:var(--rr-orange);font-weight:700">'+snapsHu.length+'</sup>':'')+'</button></td>'+
         '<td style="color:'+(cv_>=0?'#16A34A':'#DC2626')+'">'+fmtEvm(cv_)+'</td>'+
         '<td style="color:'+(sv_>=0?'#16A34A':'#DC2626')+'">'+fmtEvm(sv_)+'</td>'+
         '<td style="color:'+(cpi_>=0.95?'#16A34A':cpi_>=0.85?'#D97706':'#DC2626')+'">'+fmtNum(cpi_)+'</td>'+
@@ -1795,6 +2078,7 @@ indica "No documentado — requiere confirmación del equipo".</pre>
         '<th>VAC <span class="ux-tip" data-tip="BAC − EAC.">?</span></th>'+
         '<th>TCPI <span class="ux-tip" data-tip="(BAC−EV) ÷ (BAC−AC). >1.2 = alerta.">?</span></th>'+
         '<th>Estado</th>'+
+        '<th>📸 <span class="ux-tip" data-tip="Registrar un snapshot diario por HU (captura PV/EV/AC con fecha de hoy). El número indica cuántos snapshots lleva esta HU.">?</span></th>'+
       '</tr></thead><tbody>'+evmRowsHtml+'</tbody></table></div></div>';
 
     // Snapshot form
@@ -1803,7 +2087,13 @@ indica "No documentado — requiere confirmación del equipo".</pre>
     const snapFormHtml=
       '<div class="card"><h2>📸 Registrar medición <span class="ux-tip" data-tip="Snapshot del estado EVM. Úsalo al cierre de cada día o mínimo 2 veces/semana.">?</span></h2>'+
       '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:var(--space-3);margin-bottom:var(--space-4);align-items:end">'+
-        '<label style="font-size:.76rem;color:var(--color-text-muted)">Fecha<input type="date" id="snap-fecha" class="pert-input" style="width:100%;margin-top:.2rem" value="'+new Date().toISOString().slice(0,10)+'"></label>'+
+        '<label style="font-size:.76rem;color:var(--color-text-muted)">Fecha'+
+          '<div class="datepick" style="margin-top:.2rem">'+
+            '<input type="text" id="snap-fecha" class="datepick-txt" placeholder="YYYY-MM-DD" maxlength="10" value="'+new Date().toISOString().slice(0,10)+'" aria-label="Fecha de la medición">'+
+            '<button type="button" class="datepick-btn" data-pick-for="snap-fecha" title="Abrir calendario" aria-label="Abrir calendario">📅</button>'+
+            '<input type="date" class="datepick-hidden" data-pick-hidden-for="snap-fecha" min="2024-01-01" max="2030-12-31" tabindex="-1" aria-hidden="true">'+
+          '</div>'+
+        '</label>'+
         '<label style="font-size:.76rem;color:var(--color-text-muted)">Notas<input type="text" id="snap-notas" class="pert-input" style="width:100%;margin-top:.2rem" placeholder="Ej: fin semana 1"></label>'+
         '<button class="btn btn-primary" id="btn-snap">📌 Guardar medición</button>'+
       '</div>'+
@@ -1812,8 +2102,8 @@ indica "No documentado — requiere confirmación del equipo".</pre>
       '<div class="pmo-quick">'+
         '<p>Genera el informe semanal de la Bitácora PMO con las métricas EVM y riesgos activos. Optimizado para impresión/PDF en modo claro.</p>'+
         '<div style="display:flex;gap:.75rem;flex-wrap:wrap">'+
-        '<button class="btn btn-primary btn-lg" id="btn-pmo-quick" style="background:linear-gradient(135deg,#FF7E08,#FF9A00);font-size:.9rem;padding:.7rem 1.4rem">📋 Generar Bitácora PMO (PDF)</button>'+
-        '<button class="btn btn-secondary" id="btn-pmo-md" data-tip="Descarga la Bitácora PMO como archivo Markdown (.md) para archivar o compartir por email." style="font-size:.9rem;padding:.7rem 1.4rem">⬇ Descargar .md</button>'+
+        '<button class="btn btn-primary btn-lg" id="btn-pmo-pdf" style="background:linear-gradient(135deg,#FF7E08,#FF9A00);font-size:.9rem;padding:.7rem 1.4rem" title="Abre la vista de impresión. En el diálogo de Chrome elige destino «Guardar como PDF».">📄 Descargar PDF</button>'+
+        '<button class="btn btn-secondary" id="btn-pmo-docx" data-tip="Descarga la Bitácora PMO como archivo Word (.doc). Se abre en Word, LibreOffice o Google Docs." style="font-size:.9rem;padding:.7rem 1.4rem">📝 Descargar Word</button>'+
         '</div>'+
       '</div>'+
       '</div>';
@@ -1895,22 +2185,92 @@ indica "No documentado — requiere confirmación del equipo".</pre>
       '</div>'+
       '<div class="sub-panel" id="sub-riesgos">'+
         riesgosHtml2+
+      '</div>'+
+      '<div class="sub-panel" id="sub-specs">'+
+        renderSpecsPanel()+
       '</div>';
 
     // Wire EVM inputs — save on change but re-render only on blur to avoid flicker
     document.querySelectorAll('.evm-input').forEach(inp=>{
       inp.addEventListener('change',()=>{
-        const e=loadEvm(); e.per_hu=e.per_hu||{}; e.per_hu[inp.dataset.hu]=e.per_hu[inp.dataset.hu]||{};
-        e.per_hu[inp.dataset.hu][inp.dataset.k]=fromUnit(inp.value); saveEvm(e);
+        const hu=inp.dataset.hu, k=inp.dataset.k, cop=fromUnit(inp.value);
+        if(k==='bac'){
+          // Override BAC de la HU. 0/vacío elimina el override y vuelve al valor PERT.
+          setCustomBacHU(hu, cop>0?cop:null);
+        }else{
+          const e=loadEvm(); e.per_hu=e.per_hu||{}; e.per_hu[hu]=e.per_hu[hu]||{};
+          e.per_hu[hu][k]=cop; saveEvm(e);
+        }
       });
       inp.addEventListener('blur',()=>{ renderProgress(); });
+    });
+    // Descarga de spec ASDD por HU (Ola 4) — usa content_md embebido en data.json
+    document.querySelectorAll('.btn-spec-dl').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const huId=btn.dataset.hu;
+        const ver=btn.dataset.ver;
+        const h=(D.historias||[]).find(x=>x.hu_id===huId);
+        const specs=(h&&Array.isArray(h.specs))?h.specs:[];
+        const spec=specs.find(s=>String(s.version||'')===String(ver))||(specs.length?specs[specs.length-1]:null);
+        if(!spec||!spec.content_md){
+          flash('No hay contenido descargable para '+huId+' v'+ver+' (¿generaste los specs?)');
+          return;
+        }
+        const fname=huId+'-v'+(spec.version||ver)+'.spec.md';
+        download(fname,spec.content_md,'text/markdown');
+        flash('Descargando '+fname);
+      });
+    });
+    // Snapshot por HU — captura PV/EV/AC actual de la fila y lo guarda con fecha de hoy (Ola 3 · U3)
+    document.querySelectorAll('.btn-snap-hu').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const huId=btn.dataset.hu;
+        const e=loadEvm();
+        const cur=(e.per_hu&&e.per_hu[huId])||{pv:0,ev:0,ac:0};
+        if(!(+cur.pv||+cur.ev||+cur.ac)){
+          if(!confirm('La HU '+huId+' no tiene PV/EV/AC capturados. ¿Registrar snapshot con valores en 0?')) return;
+        }
+        const fecha=new Date().toISOString().slice(0,10);
+        e.per_hu_snapshots=e.per_hu_snapshots||{};
+        e.per_hu_snapshots[huId]=e.per_hu_snapshots[huId]||[];
+        // Evitar duplicados el mismo día: si ya hay snapshot con hoy, actualizarlo
+        const existingIdx=e.per_hu_snapshots[huId].findIndex(s=>s&&s.fecha===fecha);
+        const snap={fecha,pv:+cur.pv||0,ev:+cur.ev||0,ac:+cur.ac||0,registrado_en:new Date().toISOString()};
+        if(existingIdx>=0){ e.per_hu_snapshots[huId][existingIdx]=snap; flash('Snapshot de hoy actualizado · '+huId); }
+        else{ e.per_hu_snapshots[huId].push(snap); flash('Snapshot registrado · '+huId+' · '+fecha); }
+        saveEvm(e);
+        renderProgress();
+      });
     });
     document.querySelectorAll('.unit-btn').forEach(btn=>{
       btn.addEventListener('click',()=>{ saveUnit(btn.dataset.unit); renderProgress(); });
     });
+    // Validación visual del input de fecha de medición (sin auto-save — se consume al hacer clic en "Registrar medición")
+    const snapTxt=document.getElementById('snap-fecha');
+    if(snapTxt){
+      function snapValidate(){
+        const v=(snapTxt.value||'').trim();
+        snapTxt.classList.remove('datepick-invalid');
+        if(v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) snapTxt.classList.add('datepick-invalid');
+      }
+      snapTxt.addEventListener('change',snapValidate);
+      snapTxt.addEventListener('blur',snapValidate);
+      snapTxt.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ e.preventDefault(); snapTxt.blur(); } });
+    }
     const btnSnap=document.getElementById('btn-snap');
     if(btnSnap) btnSnap.addEventListener('click',()=>{
-      const fecha=document.getElementById('snap-fecha').value||new Date().toISOString().slice(0,10);
+      const raw=((document.getElementById('snap-fecha')||{}).value||'').trim();
+      let fecha;
+      if(raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)){
+        const d=new Date(raw+'T00:00:00');
+        if(!isNaN(d.getTime())&&d.getFullYear()>=2020&&d.getFullYear()<=2035){ fecha=raw; }
+        else { flash('Fecha fuera de rango. Usando hoy.'); fecha=new Date().toISOString().slice(0,10); }
+      } else if(raw){
+        flash('Formato inválido (usa YYYY-MM-DD). Usando hoy.');
+        fecha=new Date().toISOString().slice(0,10);
+      } else {
+        fecha=new Date().toISOString().slice(0,10);
+      }
       const notas=document.getElementById('snap-notas').value||'';
       const e=loadEvm(); e.snapshots=e.snapshots||[];
       e.snapshots.push({fecha,pv:totalPVcurrent,ev:totalEV,ac:totalAC,cpi,spi,notas,registrado_en:new Date().toISOString()});
@@ -1929,22 +2289,67 @@ indica "No documentado — requiere confirmación del equipo".</pre>
       });
     });
     // PMO quick button
-    const pmoBtn=document.getElementById('btn-pmo-quick');
-    if(pmoBtn) pmoBtn.addEventListener('click',()=>{ printPmoReport(); flash('Abriendo Bitácora PMO…'); });
-    const pmoMdBtn=document.getElementById('btn-pmo-md');
-    if(pmoMdBtn) pmoMdBtn.addEventListener('click',()=>{ const date=new Date().toISOString().slice(0,10); downloadWithPicker(SPRINT_ID+'-bitacora-pmo-'+date+'.md',buildPmoMd(),'text/markdown').then(s=>{ if(s) flash('Bitácora PMO guardada en Historico/ ✓'); }); });
+    const pmoPdfBtn=document.getElementById('btn-pmo-pdf');
+    if(pmoPdfBtn) pmoPdfBtn.addEventListener('click',()=>{ printPmoReport(); flash('Abriendo vista de impresión — elige «Guardar como PDF» en el diálogo'); });
+    const pmoDocxBtn=document.getElementById('btn-pmo-docx');
+    if(pmoDocxBtn) pmoDocxBtn.addEventListener('click',()=>{
+      const date=new Date().toISOString().slice(0,10);
+      const fname=SPRINT_ID+'-bitacora-pmo-'+date+'.doc';
+      const html=buildPmoDocHtml();
+      downloadWithPicker(fname,html,'application/msword').then(s=>{ if(s) flash('Bitácora Word guardada ✓'); });
+    });
     // BAC editable (stores in COP regardless of display unit)
     const bacInp=document.getElementById('bac-custom-input');
     const bacResetBtn=document.getElementById('btn-bac-reset');
     if(bacInp) bacInp.addEventListener('change',()=>{ const v=parseFloat(bacInp.value)||0; const cop=fromUnit(v); saveCustomBacCOP(cop>0?cop:null); renderProgress(); });
     if(bacResetBtn) bacResetBtn.addEventListener('click',()=>{ saveCustomBacCOP(null); renderProgress(); });
-    // Date inputs
-    const inpStart=document.getElementById('sprint-date-start');
-    const inpEnd=document.getElementById('sprint-date-end');
+    // Date inputs — híbrido: text input + botón que abre calendario nativo
+    // Helper común: valida YYYY-MM-DD, marca rojo si inválido, guarda y re-render si válido.
+    function wireDatepick(id,onValid){
+      const txt=document.getElementById(id);
+      if(!txt) return;
+      function commit(){
+        const v=(txt.value||'').trim();
+        txt.classList.remove('datepick-invalid');
+        if(!v){ onValid(null); return; }
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(v)){ txt.classList.add('datepick-invalid'); flash('Formato inválido. Usa YYYY-MM-DD'); return; }
+        const d=new Date(v+'T00:00:00');
+        if(isNaN(d.getTime())||d.getFullYear()<2020||d.getFullYear()>2035){ txt.classList.add('datepick-invalid'); flash('Fecha fuera de rango (2020–2035)'); return; }
+        onValid(v);
+      }
+      txt.addEventListener('change',commit);
+      txt.addEventListener('blur',commit);
+      // Permitir Enter para confirmar
+      txt.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ e.preventDefault(); commit(); txt.blur(); } });
+    }
+    wireDatepick('sprint-date-start',(v)=>{ const d=loadDates(); d.start=v||null; saveDates(d); renderProgress(); });
+    wireDatepick('sprint-date-end',  (v)=>{ const d=loadDates(); d.end=v||null;   saveDates(d); renderProgress(); });
+    // Botones 📅 → abren calendario nativo del input oculto correspondiente, sincronizan texto al elegir
+    document.querySelectorAll('.datepick-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const id=btn.dataset.pickFor;
+        const txt=document.getElementById(id);
+        const hidden=document.querySelector('[data-pick-hidden-for="'+id+'"]');
+        if(!txt||!hidden) return;
+        // Pre-cargar valor actual del texto al calendario si es válido
+        if(/^\d{4}-\d{2}-\d{2}$/.test((txt.value||'').trim())) hidden.value=txt.value.trim();
+        try{ if(typeof hidden.showPicker==='function') hidden.showPicker(); else hidden.focus(); }
+        catch(e){ hidden.focus(); }
+      });
+    });
+    // Cuando el usuario elige en el calendario oculto, copiar al text input y disparar change
+    document.querySelectorAll('.datepick-hidden').forEach(h=>{
+      h.addEventListener('change',()=>{
+        const id=h.dataset.pickHiddenFor;
+        const txt=document.getElementById(id);
+        if(!txt) return;
+        txt.value=h.value;
+        txt.classList.remove('datepick-invalid');
+        txt.dispatchEvent(new Event('change',{bubbles:true}));
+      });
+    });
     const btnAuto=document.getElementById('btn-autofill-end');
     const btnClr=document.getElementById('btn-clear-dates');
-    if(inpStart) inpStart.addEventListener('change',()=>{ const d=loadDates();d.start=inpStart.value||null;saveDates(d);renderProgress(); });
-    if(inpEnd) inpEnd.addEventListener('change',()=>{ const d=loadDates();d.end=inpEnd.value||null;saveDates(d);renderProgress(); });
     if(btnAuto) btnAuto.addEventListener('click',()=>{ const d=loadDates();const s=parseISODate(d.start);if(!s){flash('Primero declara la fecha de inicio');return;}d.end=toISODate(addBusinessDays(s,cfg.dias));saveDates(d);renderProgress(); });
     if(btnClr) btnClr.addEventListener('click',()=>{ if(!confirm('¿Borrar las fechas?'))return;saveDates({});renderProgress(); });
     // ── Capacity inputs ─────────────────────────────────
@@ -2516,6 +2921,109 @@ indica "No documentado — requiere confirmación del equipo".</pre>
       download(SPRINT_ID+'-bitacora-'+new Date().toISOString().slice(0,10)+'.html',html,'text/html');}
   }
 
+  // ── Bitácora en formato Word (.doc) ───────────────────
+  // Genera HTML compatible con MS Word / LibreOffice / Google Docs. Zero deps externas.
+  function buildPmoDocHtml(){
+    const evm=loadEvm(); const state=loadState();
+    const historias=D.historias||[];
+    const cfg=D.config||{}; const proyNombre=cfg.proyecto_nombre||SPRINT_ID;
+    const totalHoras=(D.metricas_sprint&&D.metricas_sprint.total_horas)||0;
+    const bacCop=totalHoras*HOURLY_RATE;
+    const snaps=evm.snapshots||[]; const last=snaps.length?snaps[snaps.length-1]:null;
+    let pvH='—',evH='—',acH='—',cpiS='—',spiS='—',evPct='—',eacH='—';
+    if(last){const ev=+last.ev||0,ac=+last.ac||0,pv=+last.pv||0;pvH=(pv/HOURLY_RATE).toFixed(1);evH=(ev/HOURLY_RATE).toFixed(1);acH=(ac/HOURLY_RATE).toFixed(1);cpiS=ac>0?(ev/ac).toFixed(2):'—';spiS=pv>0?(ev/pv).toFixed(2):'—';evPct=bacCop>0?((ev/bacCop)*100).toFixed(1)+'%':'—';eacH=(ac>0&&ev>0)?(bacCop*ac/ev/HOURLY_RATE).toFixed(1)+' h':'—';}
+    const allRisks=[];
+    historias.forEach(h=>{
+      const riskSt=(state[h.hu_id]||{}).risks||{};
+      (h.riesgos||[]).forEach(r=>{
+        const g=(riskSt[r.riesgo_id]&&riskSt[r.riesgo_id].gravedad)||r.gravedad||1;
+        const p=(riskSt[r.riesgo_id]&&riskSt[r.riesgo_id].probabilidad_riesgo)||r.probabilidad_riesgo||1;
+        const cerrado=riskSt[r.riesgo_id]&&riskSt[r.riesgo_id].cerrado;
+        if(!cerrado){const nv=risicarNivel(g,p);allRisks.push({hu_id:h.hu_id,id:r.riesgo_id,nivel:nv,desc:r.descripcion,mit:r.mitigacion||r.estrategia_respuesta||'—',responsable:r.responsable||'—'});}
+      });
+    });
+    allRisks.sort((a,b)=>b.nivel.val-a.nivel.val);
+    const top5=allRisks.slice(0,5);
+    // Captura del gráfico EVM como imagen embebida
+    const chartCanvas=document.getElementById('evm-chart');
+    const chartImg=chartCanvas&&window._rrChart?chartCanvas.toDataURL('image/png'):'';
+    const today=new Date().toLocaleDateString('es-CO',{year:'numeric',month:'long',day:'numeric'});
+    // CSS simple, sin @import de fuentes (Word no las resuelve bien). Word interpreta la mayoría de CSS básico.
+    const CSS='body{font-family:"Calibri","Segoe UI",Arial,sans-serif;color:#111;margin:0;padding:0;font-size:11pt;line-height:1.45}'+
+      'h1{font-size:20pt;color:#000;margin:0 0 4pt 0;font-weight:700}'+
+      'h2{font-size:13pt;color:#FF7E08;margin:18pt 0 6pt 0;font-weight:700;border-bottom:2pt solid #FF7E08;padding-bottom:3pt}'+
+      'p{margin:0 0 8pt 0}'+
+      'table{border-collapse:collapse;width:100%;margin-bottom:10pt;font-size:10pt}'+
+      'th{background:#F5F2EF;padding:6pt 8pt;text-align:left;font-weight:700;border:1pt solid #E8E2DA;color:#444;font-size:9pt;text-transform:uppercase}'+
+      'td{padding:5pt 8pt;border:1pt solid #E8E2DA;vertical-align:top}'+
+      '.header{margin-bottom:14pt;padding-bottom:8pt;border-bottom:2pt solid #FF7E08}'+
+      '.brand{color:#6B6560;font-size:9pt;margin-top:4pt}'+
+      '.kpi-grid{margin-bottom:10pt}'+
+      '.kpi{display:inline-block;margin:0 8pt 8pt 0;padding:8pt 12pt;border:1pt solid #E8E2DA;border-left:3pt solid #FF7E08;min-width:120pt;vertical-align:top}'+
+      '.kpi-label{font-size:8pt;color:#6B6560;text-transform:uppercase;font-weight:700}'+
+      '.kpi-value{font-size:16pt;font-weight:700;color:#111}'+
+      '.kpi-hint{font-size:8pt;color:#A09890}'+
+      '.chart-wrap{margin:10pt 0;text-align:center}'+
+      '.chart-wrap img{max-width:100%;height:auto;border:1pt solid #E8E2DA}'+
+      'footer{margin-top:20pt;padding-top:8pt;border-top:1pt solid #E8E2DA;font-size:8pt;color:#A09890;text-align:center}'+
+      '@page{size:A4 portrait;margin:2cm}';
+    // Namespace mágico de Word + configuración @page vía XML de Office
+    const wordXml='<xml xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word">'+
+      '<w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument>'+
+      '</xml>';
+    let body='';
+    body+='<div class="header"><h1>Bitácora Semanal PMO</h1>'+
+      '<p style="color:#6B6560;font-size:10pt">'+esc(proyNombre)+' · '+SPRINT_ID+'</p>'+
+      '<p class="brand"><strong style="color:#FF7E08">Sofka Technologies</strong> · Requirement Refinator · '+today+'</p>'+
+      '</div>';
+    body+='<h2>1. Métricas de Valor Ganado (EVM)</h2>';
+    body+='<div class="kpi-grid">'+
+      '<div class="kpi"><div class="kpi-label">BAC</div><div class="kpi-value">'+totalHoras.toFixed(0)+' h</div><div class="kpi-hint">presupuesto</div></div>'+
+      '<div class="kpi"><div class="kpi-label">PV</div><div class="kpi-value">'+pvH+' h</div><div class="kpi-hint">planificado</div></div>'+
+      '<div class="kpi"><div class="kpi-label">EV</div><div class="kpi-value">'+evH+' h</div><div class="kpi-hint">ganado</div></div>'+
+      '<div class="kpi"><div class="kpi-label">AC</div><div class="kpi-value">'+acH+' h</div><div class="kpi-hint">costo real</div></div>'+
+      '<div class="kpi"><div class="kpi-label">CPI</div><div class="kpi-value">'+cpiS+'</div><div class="kpi-hint">eficiencia costo</div></div>'+
+      '<div class="kpi"><div class="kpi-label">SPI</div><div class="kpi-value">'+spiS+'</div><div class="kpi-hint">eficiencia tiempo</div></div>'+
+      '<div class="kpi"><div class="kpi-label">% Completado</div><div class="kpi-value">'+evPct+'</div></div>'+
+      '<div class="kpi"><div class="kpi-label">EAC proyectado</div><div class="kpi-value">'+eacH+'</div></div>'+
+      '</div>';
+    if(chartImg) body+='<div class="chart-wrap"><img src="'+chartImg+'" alt="Gráfico EVM"></div>';
+    body+='<h2>2. Historial de Mediciones EVM</h2>';
+    if(snaps.length){
+      body+='<table><thead><tr><th>#</th><th>Fecha</th><th>PV (h)</th><th>EV (h)</th><th>AC (h)</th><th>CPI</th><th>SPI</th><th>Notas</th></tr></thead><tbody>';
+      snaps.forEach((s,i)=>{const pv=+s.pv||0,ev=+s.ev||0,ac=+s.ac||0;const cpi_=ac>0?(ev/ac).toFixed(2):'—';const spi_=pv>0?(ev/pv).toFixed(2):'—';
+        body+='<tr><td>'+(i+1)+'</td><td>'+esc(s.fecha||'')+'</td><td>'+(pv/HOURLY_RATE).toFixed(1)+'</td><td>'+(ev/HOURLY_RATE).toFixed(1)+'</td><td>'+(ac/HOURLY_RATE).toFixed(1)+'</td><td>'+cpi_+'</td><td>'+spi_+'</td><td>'+esc(s.notas||'')+'</td></tr>';
+      });
+      body+='</tbody></table>';
+    } else {
+      body+='<p style="color:#6B6560">Sin mediciones registradas aún.</p>';
+    }
+    body+='<h2>3. Top 5 Riesgos Activos (por severidad)</h2>';
+    if(top5.length){
+      body+='<table><thead><tr><th>HU</th><th>ID</th><th>Nivel</th><th>G×P</th><th>Descripción</th><th>Mitigación</th><th>Responsable</th></tr></thead><tbody>';
+      top5.forEach(c=>{
+        body+='<tr><td>'+esc(c.hu_id)+'</td><td>'+esc(c.id)+'</td><td>'+esc(c.nivel.label)+'</td><td><strong>'+c.nivel.val+'</strong></td><td>'+esc(c.desc)+'</td><td>'+esc(c.mit)+'</td><td>'+esc(c.responsable)+'</td></tr>';
+      });
+      body+='</tbody></table>';
+      if(allRisks.length>5) body+='<p style="font-size:9pt;color:#6B6560">'+allRisks.length+' riesgos activos en total. Se muestran los 5 de mayor severidad.</p>';
+    } else {
+      body+='<p style="color:#16A34A;font-weight:600">✓ Sin riesgos activos en el sprint.</p>';
+    }
+    body+='<h2>4. Avances y Compromisos</h2>';
+    body+='<p style="color:#6B6560;font-style:italic">[Completar manualmente antes de distribuir]</p>';
+    body+='<footer><strong>Requirement Refinator</strong> · ISO/IEC 29148:2018 · ISO/IEC 25010 · PMI-PMBOK 7<br>© Sofka Technologies 2026 · Creado por Mauricio Sepúlveda Henao con Claude Code, Antigravity, Gemini y NotebookLM</footer>';
+    // Envoltura Word completa: BOM + namespaces + MS Office XML + cuerpo
+    return '\ufeff<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">'+
+      '<head>'+
+        '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">'+
+        '<title>Bitácora PMO — '+esc(proyNombre)+'</title>'+
+        '<!--[if gte mso 9]>'+wordXml+'<![endif]-->'+
+        '<style>'+CSS+'</style>'+
+      '</head>'+
+      '<body>'+body+'</body>'+
+      '</html>';
+  }
+
   // ── View switching ─────────────────────────────────────
   function showView(name){
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
@@ -2532,11 +3040,7 @@ indica "No documentado — requiere confirmación del equipo".</pre>
 
   // ── Markdown export/import ─────────────────────────────
   function buildStatePayload(){
-<<<<<<< HEAD
-    return{version:STATE_VERSION,sprint_id:SPRINT_ID,exported_at:new Date().toISOString(),proyecto:(D&&D.config&&D.config.proyecto_nombre)||null,hitl:loadState(),evm:loadEvm(),unit:loadUnit(),dates:loadDates(),bac_custom_cop:loadCustomBacCOP(),cap:loadCap()};
-=======
-    return{version:STATE_VERSION,sprint_id:SPRINT_ID,exported_at:new Date().toISOString(),proyecto:(D&&D.config&&D.config.proyecto_nombre)||null,hitl:loadState(),evm:loadEvm(),unit:loadUnit(),dates:loadDates(),bac_custom_h:loadCustomBacH()};
->>>>>>> 7b4c1b5beed660ced47e081d5c8c044d2f86de3a
+    return{version:STATE_VERSION,sprint_id:SPRINT_ID,exported_at:new Date().toISOString(),proyecto:(D&&D.config&&D.config.proyecto_nombre)||null,hitl:loadState(),evm:loadEvm(),unit:loadUnit(),dates:loadDates(),bac_custom_cop:loadCustomBacCOP(),bac_custom_hu:loadCustomBacHU(),cap:loadCap()};
   }
   function parseStatePayload(mdText){
     const re=/<!--\s*RR-STATE-BEGIN\s*-->[\s\S]*?```json\s*([\s\S]*?)\s*```[\s\S]*?<!--\s*RR-STATE-END\s*-->/;
@@ -2551,13 +3055,10 @@ indica "No documentado — requiere confirmación del equipo".</pre>
     if(payload.evm)localStorage.setItem(EVM_KEY,JSON.stringify(payload.evm));
     if(payload.unit)localStorage.setItem(UNIT_KEY,payload.unit);
     if(payload.dates)localStorage.setItem(DATES_KEY,JSON.stringify(payload.dates));
-<<<<<<< HEAD
     if(payload.bac_custom_cop!=null)localStorage.setItem(BAC_COP_KEY,String(payload.bac_custom_cop));
     else if(payload.bac_custom_h!=null)localStorage.setItem(BAC_KEY,String(payload.bac_custom_h)); // backward compat
+    if(payload.bac_custom_hu&&typeof payload.bac_custom_hu==='object') localStorage.setItem(BAC_HU_KEY,JSON.stringify(payload.bac_custom_hu));
     if(payload.cap)localStorage.setItem(CAP_KEY,JSON.stringify(payload.cap));
-=======
-    if(payload.bac_custom_h!=null)localStorage.setItem(BAC_KEY,String(payload.bac_custom_h));
->>>>>>> 7b4c1b5beed660ced47e081d5c8c044d2f86de3a
     return{ok:true};
   }
   function handleImportFile(file,rerender){

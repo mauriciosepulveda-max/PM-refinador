@@ -85,9 +85,27 @@ Nada de `informe-cliente/informe.html`, nada de `informe.md`. Esos archivos son 
 ```
 
 5. El orquestador (o esta skill) escribe el JSON en `data.json` bajo la clave `informe_cliente`, preservando el resto.
-6. Re-inyectar `data.json` en `templates/sprint-dashboard.html` y escribir `output/<sprint-id>/index.html`.
+6. Re-inyectar `data.json` en `templates/core/sprint-dashboard.html` y escribir `output/<sprint-id>/index.html`.
 7. Limpieza: eliminar `output/<sprint-id>/informe-cliente/` si existe (legado).
-8. Reportar al PM: "Informe embebido. Abrir index.html y cambiar a la tab 'Informe Cliente'."
+8. Reportar al PM:
+
+```
+══════════════════════════════════════════════════════════════
+  ✅ INFORME CLIENTE · <sprint-id> · enriquecido y embebido
+══════════════════════════════════════════════════════════════
+
+  Dashboard: output/<sprint-id>/index.html → tab "Informe Cliente"
+
+  ➡ SIGUIENTE PASO: Generar specs ASDD de las HUs aprobadas
+     /generar-specs <sprint-id>
+
+  El spec es el contrato ejecutable que permite a Backend, Frontend
+  y QA implementar sin preguntar al PM. Ver marco ASDD en
+  .claude/agents/spec-writer.md
+══════════════════════════════════════════════════════════════
+```
+
+9. Ejecutar `bash: node scripts/next-step.js <sprint-id>` para emitir el banner de "siguiente paso" según el estado real del proyecto (el script detecta si hay specs ya generados, si falta cerrar riesgos, etc.).
 
 ## Reglas
 
