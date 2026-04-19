@@ -95,165 +95,63 @@ Si el asistente detecta que ya publicó un anuncio sin tool call en un turno pre
 
 ---
 
-## 🎚 Threshold: cuándo usar sub-agente orchestrator vs orquestación directa
+## 🎚 Threshold: Modo A vs Modo B
 
-**Constante:** `ORCHESTRATOR_HU_THRESHOLD = 5`
+**Constante:** `ORCHESTRATOR_HU_THRESHOLD = 5`. La skill `refinar-sprint` decide el modo según el número de HUs detectadas en Fase -1.
 
-El framework soporta dos modos de orquestación. La skill `refinar-sprint` decide cuál usar según el número de HUs detectadas en Fase -1.
+| Modo | Cuándo | Quién orquesta | Por qué |
+|---|---|---|---|
+| **A** | `N ≤ 5` | Sub-agente `orchestrator` (una sola invocación desde la skill) | Lógica encapsulada, menos overhead del asistente principal |
+| **B** | `N > 5` | Asistente principal (lanza N `hu-full-analyzer` en paralelo + `scripts/consolidate-sprint.js`) | Cada analyzer usa su presupuesto de tokens aislado; escala a 15-20 HUs sin reventar el contexto del sub-agente |
 
-### Modo A — Sub-agente `orchestrator` (para sprints pequeños)
-
-**Cuándo:** `N_HUs ≤ 5`.
-
-**Flujo:** La skill delega todas las fases (0→5) al sub-agente `orchestrator` con un único prompt autocontenido. El sub-agente lee contexto, lanza los N analizadores en paralelo, consolida y genera el HTML.
-
-**Ventaja:** Una sola invocación de tool desde el asistente principal; lógica encapsulada.
-**Límite:** A partir de ~6 HUs el contexto del sub-agente se infla (5 archivos de inputs + N prompts de análisis + N JSONs de respuesta) y puede agotar su presupuesto de tokens.
-
-### Modo B — Orquestación directa desde la skill (para sprints grandes)
-
-**Cuándo:** `N_HUs > 5`.
-
-**Flujo:**
-1. La skill `refinar-sprint` corre Fase -1 y Fase 0 directamente (lee inputs, arma `contexto_condensado`).
-2. Lanza los N `hu-full-analyzer` en paralelo desde el asistente principal (sin sub-agente intermedio).
-3. Recoge los N JSONs en `output/<sprint>/tmp/<hu_id>.json`.
-4. Ejecuta `bash` → `node scripts/consolidate-sprint.js <manifest>` para consolidar + inyectar HTML.
-5. El sub-agente `orchestrator` solo se usa (opcional) para el reporte final con `mode=report-only`.
-
-**Ventaja:** Cada `hu-full-analyzer` consume su propio presupuesto de tokens (aislado); el asistente principal solo bufferea los N JSONs. Escalable a 15-20 HUs.
-**Límite:** Requiere que el asistente principal siga el contrato paso a paso sin perderse (ver regla "Punto de entrada del asistente" y "Regla anti-anuncio sin ejecución").
-
-### Regla de decisión
+**Regla de decisión** (la skill DEBE emitir checkpoint visible con el modo elegido):
 
 ```
-Fase -1 (preflight OK) → N = count(glob(docs/HUs/<sprint>/*.md))
-  if N == 0            → abortar con [RR·CKPT] PRE ✗ · no hay HUs
-  if N ≤ 5             → Modo A (sub-agente orchestrator)
-  if N > 5             → Modo B (orquestación directa + consolidate-sprint.js)
+N = count(glob(docs/HUs/<sprint>/*.md))
+if N == 0 → abortar con [RR·CKPT] PRE ✗ · no hay HUs
+if N ≤ 5  → Modo A
+if N > 5  → Modo B
 ```
 
-La skill `refinar-sprint` DEBE declarar el modo elegido en un checkpoint visible:
+Ejemplo de checkpoint esperado: `[RR·CKPT] Modo B · 11 HUs > threshold (5) · orquestando desde el asistente principal`.
 
-```
-[RR·CKPT] Modo B · 11 HUs > threshold (5) · orquestando desde el asistente principal
-```
+En Modo B el sub-agente `orchestrator` solo se reserva (opcional) para el reporte final con `mode=report-only`.
 
 ---
 
-## Cómo usar (Flujo del PM)
+## Flujo del PM y comandos
 
-### Paso 1 -- Preparar los insumos
-1. Clonar este proyecto desde Git al IDE (VS Code, Cursor, Antigravity, etc.)
-2. Agregar las HUs del sprint en `docs/HUs/Sprint-X/` (archivos `.md`)
-3. Agregar/actualizar el contexto del proyecto en `docs/contexto/`:
-   - `contexto-funcional.md` -- Información de negocio, reglas, dominio
-   - `contexto-tecnico.md` -- Stack, arquitectura, integraciones, entornos
+El flujo end-to-end para el PM (setup → `/refinar-sprint` → HITL → `/iterar` → `/generar-informe` → `/generar-specs`) y la tabla completa de comandos/scripts viven en [README.md](README.md) (secciones "Flujo completo del PM" y "Comandos disponibles"). **Este archivo no los duplica** — si cambia el flujo, se actualiza allí.
 
-### Paso 2 -- Ejecutar el análisis
-```
-/refinar-sprint Sprint-X
-```
-Claude analiza TODAS las HUs en paralelo (1 agente por HU) y genera un único `output/Sprint-X/index.html` con todo.
+Para el asistente solo importan estas invocaciones reconocidas:
 
-Para una HU individual:
-```
-/refinar-hu Sprint-X "nombre-archivo-hu.md"
-```
+| Slash command | Skill a invocar |
+|---|---|
+| `/refinar-sprint <id> [--iteracion \| --consolidar \| --dry-run]` | `refinar-sprint` |
+| `/refinar-hu <id> <hu-file>` | `refinar-hu` |
+| `/iterar-refinamiento <id>` | `iterar-refinamiento` |
+| `/generar-informe <id>` | `generar-informe` |
+| `/generar-specs <id> [--hu <US> \| --iterar <US>]` | `generar-specs` |
 
-### Paso 3 -- Revisar y dar feedback (HITL)
-- Abrir `output/Sprint-X/index.html` en el navegador (SPA multi-vista)
-- **Tab "Dashboard Sprint"**: KPIs, gauges ISO 29148 / INVEST / ISO 25010, tabla de HUs
-- **Botón "Revisar HU"** por fila → entra al **Focus Mode** de la HU
-- En Focus Mode hay paneles colapsables: Narrativa, CAs Gherkin, Tareas PERT editables, Riesgos, Dependencias, Preguntas HITL, Feedback
-- **Editar PERT** (O/P/Pe) → recalcula E automáticamente
-- **Responder preguntas HITL** en los textareas
-- **Escribir feedback** libre en el panel de feedback
-- **Barra sticky**: Guardar borrador / Rechazar / Aprobar HU
-- Estado persistente en `localStorage` bajo `rr_hitl_<sprint-id>`
-- **Tab "Avance del Sprint"**: EVM completo (habilita cuando el 100% de HUs está aprobado)
-- **Tab "Informes"**: dropdown con export Markdown / informe ejecutivo / specs
-- El export Markdown genera un `.md` estructurado con el feedback, consumible por `--iteracion`
-
-### Paso 4 -- Iterar con feedback
-```
-/refinar-sprint Sprint-X --iteracion
-```
-Re-analiza SOLO las HUs rechazadas o con feedback. Las aprobadas se preservan intactas (con snapshot guard).
-
-### Paso 5 -- Generar informe al cliente
-```
-/generar-informe Sprint-X --formato ejecutivo
-```
-
-### Paso 6 -- Generar specs SDD
-```
-/generar-specs Sprint-X
-```
-
----
-
-## Comandos disponibles
-
-| Comando | Descripción |
-|---------|-------------|
-| `/refinar-sprint <sprint-id>` | Analiza todas las HUs en paralelo → 1 HTML |
-| `/refinar-sprint <sprint-id> --iteracion` | Re-analiza HUs rechazadas/con feedback |
-| `/refinar-sprint <sprint-id> --consolidar` | Solo regenera index.html con data.json existente |
-| `/refinar-sprint <sprint-id> --dry-run` | Ejecuta pre-flight + 1 HU fixture sin escribir outputs |
-| `/refinar-hu <sprint-id> <hu-file>` | Analiza 1 HU, acumula en data.json |
-| `/iterar-refinamiento <sprint-id>` | Atajo para modo iteración |
-| `/generar-informe <sprint-id>` | Informe ejecutivo (enriquece data.json) |
-| `/generar-specs <sprint-id>` | Specs SDD con HITL iterativo |
+Semántica de cada comando → ver el `SKILL.md` correspondiente en `.claude/skills/<name>/`.
 
 ---
 
 ## Flujo del orquestador
 
-```
-[FASE -1 -- PRE-FLIGHT (G0)]
-  Verificar en paralelo:
-    - docs/HUs/<sprint-id>/*.md           ≥ 1 archivo
-    - docs/contexto/contexto-funcional.md existe y no vacío
-    - docs/contexto/contexto-tecnico.md   existe y no vacío
-    - templates/core/hu-calidad.schema.json existe y JSON válido
-    - templates/core/sprint-dashboard.html contiene "/*__SPRINT_DATA__*/"
-  Si falta algo → [RR·CKPT] PRE ✗ · <motivo> · abortar sin preguntar
+El pipeline corre 6 fases (-1 → 5). Cada fase emite un `[RR·CKPT] Fase N <estado> · <detalle>` visible al PM.
 
-[FASE 0 -- CONFIGURACIÓN MÍNIMA (máx 1 pregunta al PM)]
-  Pedir fechas + equipo en un solo mensaje con defaults razonables.
-  Calcular días hábiles, capacidad, BAC sin preguntar al PM.
-  [RR·CKPT] Fase 0 ✓ · <sprint-id> · <N> HUs · sprint_config OK
+| Fase | Nombre | Output | Checkpoint clave |
+|---|---|---|---|
+| **-1** | Pre-flight (G0) | Inputs verificados | `[RR·CKPT] PRE ✓` o `PRE ✗ · <motivo>` |
+| **0** | Configuración mínima | sprint_config (fechas, equipo, capacidad, BAC) | `[RR·CKPT] Fase 0 ✓ · <sprint> · <N> HUs` |
+| **1** | Análisis paralelo | N JSONs (INVEST + ISO + Gherkin + PERT + Riesgos + Deps) | `[RR·CKPT] Fase 1 ✓ · <N> JSONs · <M> gate_failed` |
+| **2** | Quality gates G1-G9 + schema Ajv | JSONs validados (con reintento si falla) | `[RR·CKPT] Fase 2 ✓ · G1-G4 · <K> reintentos` |
+| **3** | Consolidación | `data.json` (incluye métricas_sprint) | `[RR·CKPT] Fase 3 ✓ · data.json (<X> KB)` |
+| **4** | Generación HTML | `index.html` con `/*__SPRINT_DATA__*/` reemplazado | `[RR·CKPT] Fase 4 ✓ · index.html (<Y> KB)` |
+| **5** | Reporte al PM | Resumen ejecutivo | `[RR·CKPT] Fase 5 · listo` |
 
-[FASE 1 -- ANÁLISIS EN PARALELO (1 agente por HU)]
-  Para CADA HU simultáneamente:
-  └── @hu-full-analyzer → JSON con INVEST + ISO 29148 + ISO 25010
-                          + Gherkin + Tareas PERT + Riesgos + Dependencias
-  [RR·CKPT] Fase 1 → lanzando <N> hu-full-analyzer
-  [RR·CKPT] Fase 1 ✓ · <N> JSONs recibidos · <M> con quality_gate_failed
-
-[FASE 2 -- QUALITY GATES (orquestador valida)]
-  G1: criteriosAceptacion.length >= criteriosOriginales.length
-  G2: todas las tareas tienen DoD no vacío (≥ 15 chars)
-  G3: todas las tareas tienen PERT triple coherente (O ≤ P ≤ Pe)
-  G4: calificacion_iso es número 0-5 y se recalcula determinísticamente
-  G_SCHEMA: JSON válido contra templates/core/hu-calidad.schema.json (Ajv)
-  [RR·CKPT] Fase 2 ✓ · G1-G4 validados · <K> reintentos
-
-[FASE 3 -- CONSOLIDACIÓN (orquestador construye)]
-  Reunir JSONs → calcular metricas_sprint → escribir data.json
-  [RR·CKPT] Fase 3 ✓ · data.json consolidado (<X> KB)
-
-[FASE 4 -- GENERACIÓN HTML (inyección en template)]
-  Leer templates/core/sprint-dashboard.html
-  Reemplazar /*__SPRINT_DATA__*/null con JSON.stringify(data)
-  Escribir output/Sprint-X/index.html
-  [RR·CKPT] Fase 4 ✓ · index.html generado (<Y> KB) → output/<sprint-id>/index.html
-
-[FASE 5 -- REPORTE AL PM]
-  Resumen: HUs, calificación promedio, horas, riesgos, preguntas.
-  [RR·CKPT] Fase 5 · listo
-```
+**Contrato detallado de cada fase** (pseudocódigo, validaciones exactas, side effects): [.claude/agents/orchestrator.md](.claude/agents/orchestrator.md). Si el flujo cambia, se actualiza allí — CLAUDE.md solo mantiene la tabla resumen.
 
 ---
 
@@ -273,169 +171,121 @@ Agentes legacy preservados en `.claude/agents/_legacy/` como referencia — su l
 
 ---
 
-## Estructura de archivos
+## Estructura del proyecto
 
-```
-Requirement Refinator/
-├── CLAUDE.md                              ← Este archivo (workflow master)
-├── README.md
-├── .gitignore
-├── .claude/
-│   ├── agents/                            ← registrados directamente (runtime los descubre aquí)
-│   │   ├── orchestrator.md
-│   │   ├── hu-full-analyzer.md
-│   │   ├── report-builder.md
-│   │   ├── client-report-generator.md
-│   │   ├── spec-writer.md
-│   │   ├── _legacy/                       ← Reemplazados, no usados en flujo principal
-│   │   │   └── hu-analyzer.md, gherkin-writer.md, task-estimator.md, risk-analyst.md, dependency-mapper.md
-│   │   └── _kit-base/                     ← 101 agentes del JM Kit (READ-ONLY, referencia)
-│   ├── rules/
-│   │   └── _kit-base/                     ← R-001 a R-008 + GEMINI.md (READ-ONLY)
-│   ├── skills/                            ← registradas directamente (runtime las descubre aquí)
-│   │   ├── refinar-sprint/SKILL.md
-│   │   ├── refinar-hu/SKILL.md
-│   │   ├── iterar-refinamiento/SKILL.md
-│   │   ├── generar-informe/SKILL.md
-│   │   ├── generar-specs/SKILL.md
-│   │   └── _kit-base/                     ← 110 skills genéricos (READ-ONLY)
-│   ├── workflows/
-│   │   └── _kit-base/                     ← 101 workflows genéricos (READ-ONLY)
-│   └── settings.json                      ← hook Stop de watchdog (si runtime lo soporta)
-├── docs/
-│   ├── HUs/
-│   │   ├── Sprint-X/                      ← HUs del Sprint (el PM crea esta carpeta)
-│   │   └── _fixtures/Sprint-dryrun/       ← HU dummy para --dry-run
-│   ├── contexto/
-│   │   ├── contexto-funcional.template.md
-│   │   └── contexto-tecnico.template.md
-│   └── referencia/
-├── output/
-│   └── Sprint-X/
-│       ├── index.html
-│       ├── data.json
-│       └── data.previous.json             ← snapshot pre-iteración (modo --iteracion)
-├── scripts/
-│   ├── validate-hu-json.js                ← validador Ajv del schema
-│   ├── approve_specs.js
-│   ├── generador_informes.js
-│   ├── generador_specs.js
-│   └── inyectar_feedback.js
-└── templates/
-    ├── core/                              ← CRÍTICOS — el orquestador los lee
-    │   ├── sprint-dashboard.html
-    │   └── hu-calidad.schema.json
-    └── auxiliary/
-```
+La estructura completa de carpetas vive en [README.md](README.md#estructura-del-proyecto) (canónico). Paths que el asistente debe conocer:
+
+- `.claude/agents/<name>.md` — 5 agentes activos (orchestrator, hu-full-analyzer, report-builder, client-report-generator, spec-writer). Agentes reemplazados en `.claude/agents/_legacy/`.
+- `.claude/skills/<name>/SKILL.md` — 5 skills del proyecto. El runtime descubre skills solo en este patrón, no en subnamespaces.
+- `docs/HUs/<sprint-id>/*.md` — input del sprint (1 HU por archivo).
+- `docs/contexto/contexto-{funcional,tecnico}.md` — contexto obligatorio.
+- `templates/core/sprint-dashboard.html` + `hu-calidad.schema.json` — templates críticos (el orquestador los lee).
+- `output/<sprint-id>/{index.html, data.json[, data.previous.json, tmp/, .checkpoint.json]}` — entregables y estado runtime.
+- `scripts/` — utilidades (`preflight-check.sh`, `consolidate-sprint.js`, `validate-hu-json.js`, `checkpoint.js`, `next-step.js`, `init-sprint.sh`).
+- `docs/referencia/kit-base-agents/` — 101 agentes del JM Kit (consulta humana, fuera del discovery del runtime).
 
 ---
 
 ## Reglas del sistema
 
-### Reglas v1.0 -- Base
+### Leyenda de tags
 
-1. **Sin contexto, sin análisis** -- Si `docs/contexto/` está vacío, pedir al PM que lo complete.
-2. **Sin HUs, sin análisis** -- Verificar que existan archivos `.md` en `docs/HUs/Sprint-X/`.
-3. **No inventar información técnica** -- Si no está en el contexto, marcarlo como "No documentado -- requiere confirmación".
-4. **Gherkin en español de negocio** -- Sin rutas de API ni IDs técnicos.
-5. **Estimaciones justificadas** -- Cada tarea incluye justificación de tiempo.
-6. **Preguntas, no suposiciones** -- Cuando falte info crítica, generar preguntas de clarificación.
-7. **1 agente por HU, todos en paralelo** -- hu-full-analyzer hace todo. No 5 agentes separados.
-8. **Output por sprint** -- Cada sprint en `output/Sprint-X/`. No sobreescribir sprints anteriores.
-9. **HUs aprobadas son inmutables** -- En modo iteración, no tocar las aprobadas (snapshot guard).
-10. **Sin spec APROBADO → sin implementación** -- Regla cardinal del SDD.
+Cada regla lleva un tag que indica qué pasa si se viola y cómo se hace cumplir:
+
+| Tag | Significado | Cómo se enforza |
+|---|---|---|
+| **[BLOQUEANTE]** | Violarla aborta el pipeline o el turno. No hay reintento automático. | Detección manual del asistente + `[RR·CKPT] PRE ✗` / `[RR·PAUSE]` |
+| **[GATE]** | Validada automáticamente por quality gates G1-G9 en `scripts/consolidate-sprint.js` o `validate-hu-json.js` | Reintento con feedback si falla |
+| **[ARQUITECTURA]** | Decisión de diseño del sistema. Cambiarla requiere re-arquitectura, no re-ejecución. | Code review humano (no hay check automático) |
+| **[ESTILO]** | Convención de formato, UX o observabilidad. No bloquea pero es el estándar esperado. | Revisión HITL del PM en el dashboard |
+
+### Reglas v1.0 — Base
+
+1. **[BLOQUEANTE]** Sin contexto, sin análisis — Si `docs/contexto/` está vacío, pedir al PM que lo complete.
+2. **[BLOQUEANTE]** Sin HUs, sin análisis — Verificar que existan archivos `.md` en `docs/HUs/Sprint-X/`.
+3. **[BLOQUEANTE]** No inventar información técnica — Si no está en el contexto, marcarlo como "No documentado — requiere confirmación".
+4. **[ESTILO]** Gherkin en español de negocio — Sin rutas de API ni IDs técnicos.
+5. **[ESTILO]** Estimaciones justificadas — Cada tarea incluye justificación de tiempo.
+6. **[BLOQUEANTE]** Preguntas, no suposiciones — Cuando falte info crítica, generar preguntas de clarificación (no inventar defaults).
+7. **[ARQUITECTURA]** 1 agente por HU, todos en paralelo — hu-full-analyzer hace todo. No 5 agentes separados.
+8. **[BLOQUEANTE]** Output por sprint — Cada sprint en `output/Sprint-X/`. No sobreescribir sprints anteriores.
+9. **[BLOQUEANTE]** HUs aprobadas son inmutables — En modo iteración, no tocar las aprobadas (snapshot guard enforza).
+10. **[BLOQUEANTE]** Sin spec APROBADO → sin implementación — Regla cardinal del SDD.
 
 ### Reglas de Cobertura y Calidad
 
-11. **Refinamiento AÑADE, nunca RESTA** -- data.json contiene TODA la información del fuente + el análisis.
-12. **Validación de cobertura obligatoria** -- Comparar sección por sección el original vs refinado.
-13. **Criterios originales en campo separado** -- `criteriosOriginales[]` y `criteriosAceptacion[]` coexisten.
-14. **Tareas con DoD verificable** -- `[VERBO] [ARTEFACTO] en [UBICACIÓN] -- DoD: [criterio concreto]`
-15. **PERT triple coherente** -- O ≤ P ≤ Pe → E = (O + 4P + Pe) / 6
-16. **Perfiles mínimos: DEV y QA** -- Solo separar FE/DB si hay rol dedicado en el equipo.
-17. **Template HTML inmutable** -- `sprint-dashboard.html` contiene TODO el CSS y JS. Nunca generar CSS/JS desde agentes.
-18. **Output limpio** -- Solo `index.html` + `data.json` en output/Sprint-X/ (+ `data.previous.json` en modo iteración). Sin parciales, sin individuales.
-19. **Templates son contratos** -- Leer templates/ antes de generar output.
+11. **[BLOQUEANTE]** Refinamiento AÑADE, nunca RESTA — data.json contiene TODA la información del fuente + el análisis.
+12. **[GATE]** Validación de cobertura obligatoria — Comparar sección por sección el original vs refinado (G1: criteriosAceptacion.length ≥ criteriosOriginales.length).
+13. **[BLOQUEANTE]** Criterios originales en campo separado — `criteriosOriginales[]` y `criteriosAceptacion[]` coexisten.
+14. **[GATE]** Tareas con DoD verificable — `[VERBO] [ARTEFACTO] en [UBICACIÓN] — DoD: [criterio concreto]` (G2: DoD ≥ 15 chars).
+15. **[GATE]** PERT triple coherente — O ≤ P ≤ Pe → E = (O + 4P + Pe) / 6 (G3).
+16. **[ESTILO]** Perfiles mínimos: DEV y QA — Solo separar FE/DB si hay rol dedicado en el equipo.
+17. **[ARQUITECTURA]** Template HTML inmutable — `sprint-dashboard.html` contiene TODO el CSS y JS. Nunca generar CSS/JS desde agentes.
+18. **[BLOQUEANTE]** Output limpio — Solo `index.html` + `data.json` en output/Sprint-X/ (+ `data.previous.json` en modo iteración). Sin parciales, sin individuales.
+19. **[ARQUITECTURA]** Templates son contratos — Leer templates/ antes de generar output.
 
 ### Reglas de Estándares de Calidad
 
-20. **ISO 29148 como contrato** -- 9 atributos: Necesario, Apropiado, Inequívoco, Completo, Singular, Factible, Verificable, Correcto, Conforme.
-21. **Calificación ISO 0-5 obligatoria** -- Fórmula: `(iso29148_norm * 0.50 + invest_norm * 0.30 + iso25010_norm * 0.20) * 5`
-22. **CAs ISO-compliant** -- Verificable, Singular, Inequívoco. Si no cumple → BLOQUEO.
-23. **Cobertura ISO 25010 en NFRs** -- Al menos 1 tarea de verificación por cada característica aplicable.
-24. **Agentes producen DATA** -- JSON puro. Nunca HTML, CSS ni JS.
-25. **1 template renderiza todo** -- sprint-dashboard.html lee window.__SPRINT_DATA__ y renderiza.
-26. **Contexto UNA VEZ** -- El orquestador lee archivos; los agentes reciben texto plano en el prompt.
+20. **[GATE]** ISO 29148 como contrato — 9 atributos: Necesario, Apropiado, Inequívoco, Completo, Singular, Factible, Verificable, Correcto, Conforme.
+21. **[GATE]** Calificación ISO 0-5 obligatoria — Fórmula: `(iso29148_norm * 0.50 + invest_norm * 0.30 + iso25010_norm * 0.20) * 5` (G4).
+22. **[GATE]** CAs ISO-compliant — Verificable, Singular, Inequívoco. Si no cumple → BLOQUEO.
+23. **[GATE]** Cobertura ISO 25010 en NFRs — Al menos 1 tarea de verificación por cada característica aplicable.
+24. **[ARQUITECTURA]** Agentes producen DATA — JSON puro. Nunca HTML, CSS ni JS.
+25. **[ARQUITECTURA]** 1 template renderiza todo — sprint-dashboard.html lee `window.__SPRINT_DATA__` y renderiza.
+26. **[ARQUITECTURA]** Contexto UNA VEZ — El orquestador lee archivos; los agentes reciben texto plano en el prompt.
 
 ### Reglas de Entregables (NO NEGOCIABLES)
 
-27. **UN SOLO HTML por sprint** -- `output/Sprint-X/index.html` es el único entregable visual.
-28. **Tabs del dashboard (fijas)**:
-    1. **Dashboard Sprint** -- KPIs, gauges ISO, tabla HUs, HITL (Focus Mode via "Revisar HU").
-    2. **Avance del Sprint** -- 4 sub-tabs: 💰 EVM (con PV/EV/AC iniciados en 0) · 📅 Cronograma · ⚠ Radar de Riesgos · 📄 Specs.
-       - Sub-tab Specs (siempre visible) tiene 3 estados: (a) esperando aprobación de HUs, (b) invitación a `/generar-specs`, (c) tabla con descarga `.md` por HU. Ver agente `spec-writer.md` para el marco ASDD.
-    3. **Informe Cliente** -- Renderizado desde `data.json.informe_cliente`.
-    4. **Informes** (dropdown) -- Exportar/importar Markdown, imprimir PDF.
-29. **`generar-informe` NO genera archivos externos** -- Enriquece `data.json` con `informe_cliente` y re-inyecta en el template.
-30. **Tooltips obligatorios** -- `.ux-tip` con `data-tip`.
-31. **Guías visibles por vista** -- Callout de "Qué hacer aquí" colapsable.
-32. **Alerta de pérdida de estado** -- `beforeunload` con aviso si hay cambios sin exportar.
-33. **Banner sticky de respaldo** -- CTA "Descargar respaldo (Markdown)" cuando hay cambios locales.
-34. **Round-trip completo** -- Markdown exportado contiene `<!-- RR-STATE-BEGIN -->...JSON...<!-- RR-STATE-END -->`.
-35. **Chart offline-first** -- Chart.js por CDN con fallback SVG inline. Gantt siempre SVG.
-36. **EVM parte en cero** -- PV, EV, AC siempre inician en 0. Prohibido autocompletar.
+27. **[BLOQUEANTE]** UN SOLO HTML por sprint — `output/Sprint-X/index.html` es el único entregable visual.
+28. **[BLOQUEANTE]** Tabs del dashboard (fijas):
+    1. **Dashboard Sprint** — KPIs, gauges ISO, tabla HUs, HITL (Focus Mode via "Revisar HU").
+    2. **Avance del Sprint** — 4 sub-tabs: 💰 EVM (con PV/EV/AC iniciados en 0) · 📅 Cronograma · ⚠ Radar de Riesgos · 📄 Specs.
+       - Sub-tab Specs (siempre visible) tiene 3 estados: (a) esperando aprobación de HUs, (b) invitación a `/generar-specs`, (c) tabla con descarga `.md` por HU. Ver `.claude/agents/spec-writer.md` para el marco ASDD.
+    3. **Informe Cliente** — Renderizado desde `data.json.informe_cliente`.
+    4. **Informes** (dropdown) — Exportar/importar Markdown, imprimir PDF.
+29. **[BLOQUEANTE]** `generar-informe` NO genera archivos externos — Enriquece `data.json` con `informe_cliente` y re-inyecta en el template.
+30. **[ESTILO]** Tooltips obligatorios — `.ux-tip` con `data-tip`.
+31. **[ESTILO]** Guías visibles por vista — Callout de "Qué hacer aquí" colapsable.
+32. **[ESTILO]** Alerta de pérdida de estado — `beforeunload` con aviso si hay cambios sin exportar.
+33. **[ESTILO]** Banner sticky de respaldo — CTA "Descargar respaldo (Markdown)" cuando hay cambios locales.
+34. **[BLOQUEANTE]** Round-trip completo — Markdown exportado contiene `<!-- RR-STATE-BEGIN -->...JSON...<!-- RR-STATE-END -->`.
+35. **[ARQUITECTURA]** Chart offline-first — Chart.js por CDN con fallback SVG inline. Gantt siempre SVG.
+36. **[BLOQUEANTE]** EVM parte en cero — PV, EV, AC siempre inician en 0. Prohibido autocompletar.
 
 ### Reglas de Observabilidad (v2.0)
 
-37. **Checkpoints por fase** -- Cada fase del orquestador emite `[RR·CKPT] Fase N <estado> · <detalle>` en texto plano.
-38. **Heartbeat en fases largas** -- Si una fase tarda > 60s, emitir `[RR·CKPT] Fase N · heartbeat · esperando <cosa concreta>`.
-39. **Regla de no-silencio** -- Ver sección "🛡 Regla de no-silencio" al inicio de este archivo.
-40. **Snapshot guard --iteración** -- Antes de reescribir `data.json`, copiar actual a `data.previous.json`. Post-merge, verificar que HUs `pm_aprobada: true` no cambiaron.
+37. **[GATE]** Checkpoints por fase — Cada fase del orquestador emite `[RR·CKPT] Fase N <estado> · <detalle>` en texto plano.
+38. **[ESTILO]** Heartbeat en fases largas — Si una fase tarda > 60s, emitir `[RR·CKPT] Fase N · heartbeat · esperando <cosa concreta>`.
+39. **[BLOQUEANTE]** Regla de no-silencio — Ver sección "🛡 Regla de no-silencio" al inicio de este archivo.
+40. **[BLOQUEANTE]** Snapshot guard --iteración — Antes de reescribir `data.json`, copiar actual a `data.previous.json`. Post-merge, verificar que HUs `pm_aprobada: true` no cambiaron.
 
 ---
 
-## Formato esperado de las HUs de entrada
+## Formato de HUs de entrada y Sistema de Diseño
 
-Las HUs deben estar en Markdown con al menos:
-- Quién solicita (perfil/rol)
-- Qué quiere (intención/funcionalidad)
-- Para qué (propósito/beneficio de negocio)
-- Detalle del desarrollo solicitado
-- Criterios de aceptación (pueden ser básicos, los agentes los expandirán)
-
-Ver `docs/HUs/README.md` para la guía completa.
+- **Formato de HUs**: guía completa para el PM en [docs/HUs/README.md](docs/HUs/README.md). Mínimo obligatorio por HU: rol (quién), intención (qué), beneficio (para qué), detalle del desarrollo, criterios de aceptación iniciales.
+- **Sistema de Diseño**: tokens, paleta, tipografía y estilos viven en [docs/ui-design-guidelines.md](docs/ui-design-guidelines.md) y están aplicados UNA sola vez en `templates/core/sprint-dashboard.html`. **Regla operativa**: los agentes nunca generan CSS ni HTML — solo producen JSON.
 
 ---
 
-## Sistema de Diseño
+## Checklist post-refactor
 
-El template HTML usa el sistema de diseño definido en `docs/ui-design-guidelines.md`:
-- **Primario:** `#FF7E08` (naranja)
-- **Fondo oscuro:** `#000000` (negro -- header)
-- **Fondo base:** `#FAF8F6` (gris cálido)
-- **Fuentes:** Clash Grotesk (headings) + Inter (body) + JetBrains Mono (código)
-- **Semánticos (RAG):** Verde `#16A34A` / Ámbar `#D97706` / Rojo `#DC2626`
+Corre `bash scripts/preflight-check.sh` (4 chequeos: merge markers, 5/5 skills registradas, 5/5 agentes registrados, JS del template compila). Exit 0 = OK · 1 = fallos · 2 = error.
 
-Todo esto está definido UNA SOLA VEZ en `templates/core/sprint-dashboard.html`. Los agentes nunca generan CSS.
+Se invoca automáticamente como primer paso de Fase -1 del orchestrator. Se recomienda engancharlo a pre-commit local (`git config core.hooksPath .claude/hooks`).
+
+Si preflight pasa pero algo sigue raro: reinicia sesión Claude Code (el system-reminder debe listar las 5 skills `refinar-*` y `generar-*`) y verifica que `Skill(skill="refinar-sprint")` no devuelva "Unknown skill".
 
 ---
 
-## Checklist post-refactor (verificación rápida)
+## Regression testing del analyzer
 
-Si algo no funciona tras mover archivos, corre **`bash scripts/preflight-check.sh`**. Ejecuta 4 chequeos automáticos:
+Las fixtures `docs/HUs/_fixtures/Sprint-dryrun/HU-{dryrun,malformada}.md` + sus `.expectations.json` permiten validar la **calidad** del output del `hu-full-analyzer` sin correr sobre HUs reales. Usar tras cambios al prompt de `hu-full-analyzer.md` o update del modelo:
 
-1. No hay merge markers sin resolver en `CLAUDE.md`, `templates/core/`, `.claude/agents/`, `.claude/skills/`.
-2. Las 5 skills del proyecto están registradas en `.claude/skills/<name>/SKILL.md`.
-3. Los 5 agentes del proyecto están registrados en `.claude/agents/<name>.md`.
-4. El JS del template `sprint-dashboard.html` compila (no hay conflict markers embebidos en `<script>`, `<<`, etc.).
+```
+node scripts/regression-check.js \
+  docs/HUs/_fixtures/Sprint-dryrun/HU-dryrun.expectations.json \
+  output/Sprint-dryrun/tmp/HU-DRYRUN.json
+```
 
-Exit codes: `0` = OK · `1` = fallos · `2` = error de ejecución.
-
-Se recomienda correr también:
-- Antes de cada commit (se puede enganchar a un pre-commit hook local con `git config core.hooksPath .claude/hooks`).
-- Como primer paso de Fase -1 de `/refinar-sprint` (el orchestrator lo invoca).
-
-Checks manuales adicionales si el preflight pasa pero algo sigue raro:
-- Reiniciar sesión Claude Code; el system-reminder debe listar `refinar-sprint`, `refinar-hu`, etc.
-- `Skill(skill="refinar-sprint")` no debe retornar "Unknown skill".
-- `grep "_project/" .claude/skills/ .claude/agents/ CLAUDE.md` — sólo resultados históricos o en `_kit-base/`, no en archivos activos.
+Exit 0 = sin regresiones críticas · Exit 1 = al menos 1 regresión · Exit 2 = error de ejecución. Detalle del contrato de expectations en [docs/HUs/\_fixtures/README.md](docs/HUs/_fixtures/README.md).
