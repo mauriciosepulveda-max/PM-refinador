@@ -66,7 +66,57 @@
 
 ---
 
-## 6. Restricciones Técnicas
+## 6. Restricciones Técnicas — **Contrato ejecutable**
+
+> Las sub-secciones 6.1 a 6.4 son **el contrato que el `spec-writer` y el `hu-full-analyzer` aplican** al generar specs, CAs y tareas para este sprint. Todo lo no declarado aquí se considera fuera del alcance técnico del sprint. No heredamos reglas globales — cada proyecto define su propio stack y restricciones.
+
+### 6.1 Tecnologías permitidas
+
+Además del stack declarado en la sección 1 y las integraciones de la sección 3, se permiten:
+
+| Categoría | Permitido | Versión mínima / Notas |
+|---|---|---|
+| [ej: Librerías de utilidades] | [ej: lodash, date-fns, zod] | [ej: sin polyfills manuales, usar las APIs nativas cuando existan] |
+| [ej: Cliente HTTP] | [ej: axios 1.x] | [ej: usar interceptors compartidos del BFF] |
+| [ej: ORM / query builder] | [ej: TypeORM] | [ej: evitar raw SQL fuera de migraciones] |
+
+### 6.2 Tecnologías / librerías PROHIBIDAS
+
+Lista explícita de lo que el spec-writer debe **rechazar** si aparece en una propuesta de solución. Si una alternativa listada aquí aparece en una HU, el Gate 0 del spec falla y se sustituye por un equivalente permitido.
+
+| Prohibido | Motivo | Alternativa permitida |
+|---|---|---|
+| [ej: AWS Lambda, S3] | [ej: política corporativa — cloud provider único] | [ej: Firebase Functions, Cloud Storage] |
+| [ej: moment.js] | [ej: librería deprecada + peso bundle] | [ej: date-fns] |
+| [ej: jQuery] | [ej: incompatible con el stack Angular 17] | [ej: RxJS + signals nativos] |
+
+### 6.3 Convenciones de código obligatorias
+
+Normas que **el spec-writer** debe reflejar en la sección "Arquitectura" y que **el hu-full-analyzer** debe considerar al estimar tareas de verificación.
+
+- [ej: TypeScript estricto (`strict: true`, sin `any` implícitos)]
+- [ej: ES Modules (`import`/`export`), nunca CommonJS `require`]
+- [ej: Nombres de archivos en `kebab-case`, componentes en `PascalCase`, variables en `camelCase`]
+- [ej: Semantic HTML5 obligatorio (`<header>`, `<main>`, `<article>` etc.) — no `<div>`-soup]
+- [ej: Cobertura mínima de tests 80% líneas / 70% ramas por PR]
+
+### 6.4 Herramientas obligatorias
+
+Herramientas que deben aparecer como tareas de verificación o configuración en las estimaciones PERT si la HU toca su área.
+
+| Área | Herramienta obligatoria | Uso |
+|---|---|---|
+| [ej: CI/CD] | [ej: GitHub Actions] | [ej: pipeline `.github/workflows/pr.yml` ejecuta lint + test + build + sonar] |
+| [ej: Testing unitario] | [ej: Jest 29 + Testing Library] | [ej: 1 archivo `*.spec.ts` por servicio; mocks con `jest.mock`] |
+| [ej: Linter] | [ej: ESLint + Prettier] | [ej: config compartida en `@empresa/eslint-config`] |
+| [ej: Gestión de secretos] | [ej: Google Secret Manager] | [ej: nunca hardcodear credenciales; leer desde `process.env` poblado por el runtime] |
+| [ej: Observabilidad] | [ej: OpenTelemetry + Google Cloud Logging] | [ej: todo endpoint emite traza con `x-request-id`] |
+
+---
+
+## 7. Otras restricciones de arquitectura
+
+(Esta sección es libre — usar para invariantes arquitectónicas que no encajan en 6.1–6.4.)
 
 - [ej: Los microservicios se comunican únicamente vía Kafka (no llamadas síncronas directas)]
 - [ej: Base de datos compartida entre sbs-api-emisión y sbs-api-recaudo (migrar con Flyway)]
