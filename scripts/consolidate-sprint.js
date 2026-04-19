@@ -71,6 +71,123 @@ function avg(arr) {
 
 function round2(n) { return Math.round(n * 100) / 100; }
 
+// Algunos analyzers emiten calificacion_iso como objeto de diagnóstico
+// (ej. {formula, calculo, calificacion_iso: 4.1, ...} o {score_final: 3.5, ...}).
+// El schema exige number. Normalizamos aquí para no romper el render del template
+// (h.calificacion_iso.toFixed(1) falla si el valor es objeto).
+function coerceCalificacionIso(v) {
+  if (typeof v === 'number' && !isNaN(v)) return v;
+  if (v && typeof v === 'object') {
+    const keys = ['calificacion_iso', 'score_final', 'score', 'valor', 'value', 'result', 'final'];
+    for (const k of keys) {
+      if (typeof v[k] === 'number' && !isNaN(v[k])) return v[k];
+    }
+    for (const k of Object.keys(v)) {
+      if (typeof v[k] === 'number' && v[k] >= 0 && v[k] <= 5) return v[k];
+    }
+  }
+  return 0;
+}
+
+// Busca el primer número válido entre varias claves candidatas.
+function firstNumber(obj, keys) {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === 'number' && !isNaN(v)) return v;
+    if (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v))) return Number(v);
+  }
+  return null;
+}
+
+// Normaliza una tarea que pudo llegar con aliases (id→tarea_id, perfil→tipo,
+// pert objeto → campos planos O/P/Pe/E, estimacion_horas → estimacion_pert).
+// Sin esta normalización, el template no puede calcular horas ni distribución.
+function normalizeTarea(t) {
+  if (!t || typeof t !== 'object') return t;
+  const out = { ...t };
+  if (!out.tarea_id && out.id) out.tarea_id = out.id;
+  if (!out.tipo && out.perfil) out.tipo = out.perfil;
+  if (!out.tipo) out.tipo = 'DEV';
+  out.tipo = String(out.tipo).toUpperCase().trim();
+  // Extraer PERT desde out.pert (objeto) si los campos planos no existen
+  const pertObj = (out.pert && typeof out.pert === 'object') ? out.pert : null;
+  const estPertObj = (out.estimacion_pert && typeof out.estimacion_pert === 'object') ? out.estimacion_pert : null;
+  const src = pertObj || estPertObj || {};
+  const O  = firstNumber(src, ['optimista', 'optimista_O', 'O', 'o']);
+  const P  = firstNumber(src, ['probable', 'probable_P', 'P', 'p', 'masProbable']);
+  const Pe = firstNumber(src, ['pesimista', 'pesimista_Pe', 'Pe', 'pe']);
+  const Ex = firstNumber(src, ['esperado', 'esperado_E', 'E', 'e', 'pert', 'valor']);
+  if (out.estimacion_o == null && O != null) out.estimacion_o = O;
+  if (out.estimacion_p == null && P != null) out.estimacion_p = P;
+  if (out.estimacion_pe == null && Pe != null) out.estimacion_pe = Pe;
+  // estimacion_pert: preferencia orden → número directo > horas > PERT calculado > E extraído
+  let pertNum = null;
+  if (typeof out.estimacion_pert === 'number') pertNum = out.estimacion_pert;
+  else if (typeof out.estimacion_horas === 'number') pertNum = out.estimacion_horas;
+  else if (typeof out.horas === 'number') pertNum = out.horas;
+  else if (Ex != null) pertNum = Ex;
+  else if (O != null && P != null && Pe != null) pertNum = (O + 4 * P + Pe) / 6;
+  out.estimacion_pert = pertNum != null ? Math.round(pertNum * 100) / 100 : 0;
+  // descripcion puede venir vacía pero haber titulo
+  if (!out.descripcion && out.titulo) out.descripcion = out.titulo;
+  return out;
+}
+
+// Normaliza TODA la HU para que cumpla el shape que espera el template:
+//   - tareas[] (alias: tareas_tecnicas)
+//   - estimacion_total_horas (alias: estimacion_pert_total / estimacion_total, o
+//     cualquier objeto con horas_esperadas/total_horas/etc., o suma de tareas)
+//   - distribucion_por_tipo calculada de las tareas si falta
+// Toda normalización es loggeable para diagnóstico.
+function normalizeHu(hu) {
+  const notes = [];
+  // 1) Array de tareas
+  if (!Array.isArray(hu.tareas) && Array.isArray(hu.tareas_tecnicas)) {
+    hu.tareas = hu.tareas_tecnicas;
+    notes.push('tareas_tecnicas→tareas');
+  }
+  if (Array.isArray(hu.tareas)) {
+    hu.tareas = hu.tareas.map(normalizeTarea);
+  } else {
+    hu.tareas = [];
+  }
+  // 2) estimacion_total_horas
+  const totalKeys = ['horas_esperadas', 'total_horas', 'horas_total', 'horas_total_esperadas', 'horas_dev_esperadas', 'esperado', 'total'];
+  if (typeof hu.estimacion_total_horas !== 'number' || isNaN(hu.estimacion_total_horas)) {
+    let total = null;
+    const candidates = [hu.estimacion_total_horas, hu.estimacion_pert_total, hu.estimacion_total, hu.horas_totales];
+    for (const c of candidates) {
+      if (typeof c === 'number' && !isNaN(c)) { total = c; break; }
+      if (c && typeof c === 'object') {
+        const n = firstNumber(c, totalKeys);
+        if (n != null) { total = n; break; }
+      }
+    }
+    if (total == null && hu.tareas.length) {
+      total = hu.tareas.reduce((a, t) => a + (Number(t.estimacion_pert) || 0), 0);
+      notes.push('total=Σtareas');
+    }
+    hu.estimacion_total_horas = total != null ? Math.round(total * 100) / 100 : 0;
+    if (total != null) notes.push('estimacion_total_horas normalizado');
+  }
+  // 3) distribucion_por_tipo
+  const validTipos = ['DEV', 'FE', 'QA', 'DB', 'DEVOPS', 'UX'];
+  const distNecesita = !hu.distribucion_por_tipo || typeof hu.distribucion_por_tipo !== 'object' ||
+    !validTipos.some(t => typeof hu.distribucion_por_tipo[t] === 'number');
+  if (distNecesita && hu.tareas.length) {
+    const dist = { DEV: 0, FE: 0, QA: 0, DB: 0, DEVOPS: 0, UX: 0 };
+    hu.tareas.forEach(t => {
+      const tipo = validTipos.includes(t.tipo) ? t.tipo : 'DEV';
+      dist[tipo] += Number(t.estimacion_pert) || 0;
+    });
+    Object.keys(dist).forEach(k => { dist[k] = Math.round(dist[k] * 100) / 100; });
+    hu.distribucion_por_tipo = dist;
+    notes.push('distribucion_por_tipo calculada');
+  }
+  return { hu, notes };
+}
+
 function classifyLevel(c) {
   if (c >= 4.5) return 'Excelente';
   if (c >= 3.5) return 'Buena';
@@ -126,6 +243,17 @@ function main() {
     if (!fs.existsSync(h.source)) die(`fuente no existe: ${h.source}`);
     const hu = extractHuJson(h.source);
     if (!hu.hu_id) hu.hu_id = h.hu_id; // fallback
+    // Sanitizar campos numéricos que a veces vienen como objeto de diagnóstico
+    const originalCal = hu.calificacion_iso;
+    hu.calificacion_iso = coerceCalificacionIso(originalCal);
+    if (originalCal !== hu.calificacion_iso && typeof originalCal === 'object') {
+      console.log(`    ⚠ ${hu.hu_id}: calificacion_iso era objeto → normalizado a ${hu.calificacion_iso}`);
+    }
+    // Normalizar tareas + total horas + distribucion (aliases: tareas_tecnicas, id/perfil, pert objeto, estimacion_pert_total)
+    const { notes } = normalizeHu(hu);
+    if (notes.length) {
+      console.log(`    ⚠ ${hu.hu_id}: ${notes.join(', ')}`);
+    }
     // Preservar specs[] de la versión previa de esta misma HU
     const prev = prevByHu[hu.hu_id];
     if (prev && Array.isArray(prev.specs) && prev.specs.length > 0 && !Array.isArray(hu.specs)) {
@@ -229,4 +357,15 @@ function main() {
   } catch (_) { /* next-step es informativo, no bloqueamos si falla */ }
 }
 
-main();
+// Exports para tests de regresión
+module.exports = {
+  normalizeHu,
+  normalizeTarea,
+  coerceCalificacionIso,
+  firstNumber,
+  computeMetrics,
+  classifyLevel,
+};
+
+// Solo ejecutar main() si este archivo es invocado directamente (no require'd)
+if (require.main === module) main();
