@@ -18,9 +18,9 @@ errors=0
 warnings=0
 
 echo "[preflight] 1/4 · Merge markers en archivos críticos..."
-# grep -l sobre files que existen; filtrar _kit-base/ (read-only) y _legacy/ (referencia)
+# grep -l sobre files que existen; filtrar _legacy/ (referencia histórica de agentes reemplazados)
 MARKER_FILES=$(grep -rln "^<<<<<<<\|^=======$\|^>>>>>>>" CLAUDE.md templates/core/ .claude/agents/ .claude/skills/ 2>/dev/null \
-  | grep -v "/_kit-base/" | grep -v "/_legacy/" || true)
+  | grep -v "/_legacy/" || true)
 if [ -n "$MARKER_FILES" ]; then
   echo "  ✗ Merge markers sin resolver en:"
   echo "$MARKER_FILES" | sed 's/^/    /'

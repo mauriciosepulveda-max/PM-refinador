@@ -326,7 +326,7 @@ El proyecto adopta el marco **ASDD de Sofka** como cimiento para la generación 
 2. **Arquitectura** — drivers, componentes, diagrama de secuencia (SSD), flowchart, API contracts, modelo de datos, riesgos técnicos
 3. **Calidad** — CAs Gherkin refinados, casos de prueba base, criterios verificables (cobertura, latencia), estrategia de testing
 4. **Diseño & UX** — design system, WCAG AA, responsive
-5. **Restricciones** — librerías permitidas/prohibidas (R-002/R-003/R-007), versiones mínimas, anti-patrones, compliance
+5. **Restricciones** — librerías permitidas/prohibidas, convenciones de código, herramientas obligatorias, anti-patrones, compliance (todo derivado de `docs/contexto/contexto-tecnico.md` secciones 6.1–6.4 y 7 del sprint activo — el framework es agnóstico a tecnologías)
 
 ### Gate 0 — Validación antes de APROBADO
 
@@ -394,27 +394,25 @@ PM-refinador/
 │   │   ├── refinar-hu/
 │   │   ├── iterar-refinamiento/
 │   │   ├── generar-informe/
-│   │   ├── generar-specs/          ← Actualizada con pipeline ASDD
-│   │   └── _kit-base/              ← 110 skills genéricos (READ-ONLY)
-│   ├── rules/_kit-base/            ← R-001 a R-008 + GEMINI.md
+│   │   └── generar-specs/          ← Pipeline ASDD
 │   └── scripts/watchdog-empty-turn.js
 ├── scripts/                        ← Scripts utilitarios Node/Bash
 │   ├── preflight-check.sh
 │   ├── init-sprint.sh
 │   ├── consolidate-sprint.js
 │   ├── validate-hu-json.js
+│   ├── regression-check.js         ← Golden expectations de calidad
 │   ├── next-step.js
 │   ├── checkpoint.js
 │   └── worktree-info.js
 ├── docs/
 │   ├── HUs/
 │   │   ├── Sprint-X/               ← Tus HUs (gitignored)
-│   │   └── _fixtures/Sprint-dryrun/← HU sintética para --dry-run
+│   │   └── _fixtures/Sprint-dryrun/← HUs sintéticas para --dry-run y regression-check
 │   ├── contexto/
 │   │   ├── contexto-funcional.template.md
-│   │   └── contexto-tecnico.template.md
-│   └── referencia/                 ← ISO 29148, 25010, INVEST, RISICAR, etc.
-│       └── kit-base-agents/        ← 101 agentes del JM Kit (consulta humana)
+│   │   └── contexto-tecnico.template.md  ← Contrato ejecutable (stack, permitidas/prohibidas, convenciones)
+│   └── referencia/                 ← ISO 29148, 25010, INVEST, RISICAR, política de schema, etc.
 ├── templates/
 │   ├── core/
 │   │   ├── sprint-dashboard.html   ← Template único (no modificar)

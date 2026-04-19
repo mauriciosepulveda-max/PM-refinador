@@ -178,11 +178,10 @@ La estructura completa de carpetas vive en [README.md](README.md#estructura-del-
 - `.claude/agents/<name>.md` — 5 agentes activos (orchestrator, hu-full-analyzer, report-builder, client-report-generator, spec-writer). Agentes reemplazados en `.claude/agents/_legacy/`.
 - `.claude/skills/<name>/SKILL.md` — 5 skills del proyecto. El runtime descubre skills solo en este patrón, no en subnamespaces.
 - `docs/HUs/<sprint-id>/*.md` — input del sprint (1 HU por archivo).
-- `docs/contexto/contexto-{funcional,tecnico}.md` — contexto obligatorio.
+- `docs/contexto/contexto-{funcional,tecnico}.md` — **contexto obligatorio**. El `contexto-tecnico.md` sección 6 define librerías permitidas/prohibidas, convenciones y herramientas obligatorias del sprint (el framework es agnóstico a tecnologías: no hay stack global, cada sprint declara el suyo).
 - `templates/core/sprint-dashboard.html` + `hu-calidad.schema.json` — templates críticos (el orquestador los lee).
 - `output/<sprint-id>/{index.html, data.json[, data.previous.json, tmp/, .checkpoint.json]}` — entregables y estado runtime.
-- `scripts/` — utilidades (`preflight-check.sh`, `consolidate-sprint.js`, `validate-hu-json.js`, `checkpoint.js`, `next-step.js`, `init-sprint.sh`).
-- `docs/referencia/kit-base-agents/` — 101 agentes del JM Kit (consulta humana, fuera del discovery del runtime).
+- `scripts/` — utilidades (`preflight-check.sh`, `consolidate-sprint.js`, `validate-hu-json.js`, `regression-check.js`, `checkpoint.js`, `next-step.js`, `init-sprint.sh`).
 
 ---
 
