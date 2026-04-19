@@ -3,6 +3,10 @@
   "$id": "hu-calidad.schema.json",
   "title": "Historia de Usuario — Schema de Calidad ISO",
   "description": "Contrato de output para el análisis completo de una HU. Conforme con ISO/IEC/IEEE 29148:2018 e ISO/IEC 25010. Todos los campos 'required' son BLOQUEANTES.",
+  "schemaVersion": "1.0.0",
+  "changelog": [
+    { "version": "1.0.0", "fecha": "2026-04-18", "resumen": "Versión inicial formalizada. Introduce campo schema_version opcional en outputs. Outputs sin schema_version se asumen v1.0.0 para compatibilidad legacy." }
+  ],
   "normativas": ["ISO/IEC/IEEE 29148:2018", "ISO/IEC 25010", "INVEST"],
   "type": "object",
   "required": [
@@ -34,6 +38,12 @@
     "preguntas_clarificacion"
   ],
   "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Versión del schema que produjo este output (semver). Opcional por compatibilidad con outputs v1.0.0 legacy (se asume '1.0.0' si está ausente). Outputs producidos por hu-full-analyzer a partir de 2026-04-18 DEBEN declarar la versión exacta.",
+      "examples": ["1.0.0"]
+    },
     "hu_id": {
       "type": "string",
       "description": "Identificador único e inmutable de la HU. ISO 29148 §5.2.8: nunca reutilizar.",

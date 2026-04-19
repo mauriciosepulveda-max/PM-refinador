@@ -1,0 +1,36 @@
+{
+  "fixture_id": "HU-dryrun",
+  "fixture_path": "docs/HUs/_fixtures/Sprint-dryrun/HU-dryrun.md",
+  "expectations_version": "1.0.0",
+  "schema_version_expected": "1.0.0",
+  "description": "HU bien formada con 5 CAs explícitos, narrativa Como/Quiero/Para clara y contexto técnico documentado. El analyzer debería producir calificación ISO alta, cobertura completa de criterios originales y pocas preguntas HITL.",
+  "rationale": "Fixture sintética diseñada como baseline de calidad. Cualquier analyzer que degrade el score por debajo del rango esperado aquí tiene una regresión real — no es un caso frontera.",
+  "assertions": [
+    { "path": "schema_version", "rule": "equals", "value": "1.0.0", "severity": "critical" },
+    { "path": "hu_id", "rule": "matches", "value": "^HU-DRY", "severity": "critical" },
+    { "path": "titulo_original", "rule": "type", "value": "string", "severity": "critical" },
+    { "path": "narrativa_original", "rule": "minLength", "value": 50, "severity": "critical" },
+    { "path": "narrativa_refinada.rol", "rule": "contains_any", "values": ["PM", "Product Manager"], "severity": "warning" },
+    { "path": "narrativa_refinada.beneficio", "rule": "minLength", "value": 10, "severity": "critical" },
+    { "path": "narrativa_completa", "rule": "matches", "value": "Como .*, quiero .*, para .*", "severity": "critical" },
+
+    { "path": "criteriosOriginales.length", "rule": "between", "min": 4, "max": 6, "severity": "critical" },
+    { "path": "criteriosAceptacion.length", "rule": "min", "value": 5, "severity": "critical" },
+
+    { "path": "invest_score_norm", "rule": "between", "min": 0.6, "max": 1.0, "severity": "warning" },
+    { "path": "iso29148_score_norm", "rule": "between", "min": 0.6, "max": 1.0, "severity": "warning" },
+    { "path": "iso25010_score_norm", "rule": "between", "min": 0.3, "max": 1.0, "severity": "warning" },
+    { "path": "calificacion_iso", "rule": "between", "min": 3.5, "max": 5.0, "severity": "critical" },
+    { "path": "calificacion_nivel", "rule": "in", "values": ["Excelente", "Buena"], "severity": "critical" },
+
+    { "path": "tareas.length", "rule": "min", "value": 1, "severity": "critical" },
+    { "path": "tareas.length", "rule": "between", "min": 3, "max": 15, "severity": "critical" },
+    { "path": "tareas[*].dod", "rule": "each_minLength", "value": 15, "severity": "critical" },
+    { "path": "tareas[*].estimacion_o", "rule": "each_min", "value": 0.5, "severity": "critical" },
+    { "path": "tareas[*].pert_coherence", "rule": "each_pert_coherent", "severity": "critical" },
+
+    { "path": "preguntas_clarificacion.length", "rule": "max", "value": 6, "severity": "warning" },
+    { "path": "riesgos", "rule": "type", "value": "array", "severity": "critical" },
+    { "path": "dependencias", "rule": "type", "value": "array", "severity": "critical" }
+  ]
+}

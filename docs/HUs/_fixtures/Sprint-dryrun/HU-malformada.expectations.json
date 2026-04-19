@@ -1,0 +1,27 @@
+{
+  "fixture_id": "HU-malformada",
+  "fixture_path": "docs/HUs/_fixtures/Sprint-dryrun/HU-malformada.md",
+  "expectations_version": "1.0.0",
+  "schema_version_expected": "1.0.0",
+  "description": "HU deliberadamente mal formada: narrativa sin rol/beneficio explícitos, detalle con fluff (rápido, robusto, mejores prácticas), 2 CAs ambiguos sin umbrales medibles. El analyzer debería detectar la baja calidad y producir calificación ISO baja, muchas preguntas HITL y riesgos de ambigüedad.",
+  "rationale": "Contraparte de HU-dryrun. Verifica que el analyzer NO inventa calidad donde no la hay. Si produce ISO alto en una HU pobre, hay sobrecomplacencia del modelo.",
+  "assertions": [
+    { "path": "schema_version", "rule": "equals", "value": "1.0.0", "severity": "critical" },
+    { "path": "hu_id", "rule": "matches", "value": "^HU-MAL", "severity": "critical" },
+    { "path": "narrativa_original", "rule": "type", "value": "string", "severity": "critical" },
+
+    { "path": "criteriosOriginales.length", "rule": "between", "min": 2, "max": 3, "severity": "critical" },
+    { "path": "criteriosAceptacion.length", "rule": "min", "value": 5, "severity": "critical" },
+
+    { "path": "iso29148_score_norm", "rule": "between", "min": 0.0, "max": 0.55, "severity": "critical" },
+    { "path": "calificacion_iso", "rule": "between", "min": 0.0, "max": 3.0, "severity": "critical" },
+    { "path": "calificacion_nivel", "rule": "in", "values": ["Aceptable", "Deficiente", "Crítica"], "severity": "critical" },
+
+    { "path": "preguntas_clarificacion.length", "rule": "min", "value": 3, "severity": "critical" },
+    { "path": "ambiguedades", "rule": "minArrayLength", "value": 1, "severity": "warning" },
+
+    { "path": "tareas.length", "rule": "min", "value": 1, "severity": "critical" },
+    { "path": "tareas[*].dod", "rule": "each_minLength", "value": 15, "severity": "critical" },
+    { "path": "tareas[*].pert_coherence", "rule": "each_pert_coherent", "severity": "critical" }
+  ]
+}

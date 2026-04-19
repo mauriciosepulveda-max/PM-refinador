@@ -149,6 +149,7 @@ Generar preguntas sobre:
 Responde **SOLO con un bloque JSON válido**. Sin texto antes ni después. Campos requeridos:
 
 ```
+schema_version: "1.0.0"                 ← OBLIGATORIO, declara la versión del contrato (ver docs/referencia/schema-migration-policy.md)
 hu_id, titulo_original, titulo_mejorado (≤80c), narrativa_original (ÍNTEGRA),
 narrativa_refinada {rol, accion, beneficio}, narrativa_completa (string Como/Quiero/Para)
 

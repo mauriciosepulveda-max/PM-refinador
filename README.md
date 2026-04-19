@@ -253,6 +253,7 @@ En cada paso, `scripts/next-step.js` emite un banner con el comando exacto sigui
 | `scripts/init-sprint.sh Sprint-X --init \| --ingest <ruta>` | Onboarding asistido del sprint | Antes de agregar HUs |
 | `scripts/consolidate-sprint.js <manifest>` | Consolida N JSONs + inyecta HTML con post-write validation | Interno de `/refinar-sprint` Modo B |
 | `scripts/validate-hu-json.js <path>` | Valida un JSON de HU contra el schema (Ajv con fallback) | Interno de Fase 2 |
+| `scripts/regression-check.js <expectations> <output>` | Valida **calidad** del output contra golden expectations (rangos ISO, coberturas, PERT, preguntas HITL) | Detectar regresiones del analyzer sin correr sobre HUs reales · ver [docs/HUs/\_fixtures/README.md](docs/HUs/_fixtures/README.md) |
 | `scripts/next-step.js <sprint>` | Emite el siguiente paso sugerido al PM según estado | Fin de cada skill |
 | `scripts/checkpoint.js <save\|load\|clear\|list-completed>` | Resumabilidad de ejecuciones largas | Interno de `/refinar-sprint` Modo B |
 | `scripts/worktree-info.js` | Dual-path awareness cuando operas desde worktrees | Interno de `next-step.js` |
@@ -354,31 +355,21 @@ Al aprobar un spec (manual + Gate 0): actualizar frontmatter a `estado: APROBADO
 
 ---
 
-## Arquitectura de agentes (V1)
+## Arquitectura de agentes
 
 ```
-orchestrator              ← Coordina el flujo completo (modo A: sub-agente; modo B: distribuido)
+orchestrator              ← Coordina el flujo completo (Modo A: sub-agente; Modo B: distribuido)
 ├── hu-full-analyzer × N  ← 1 por HU, en paralelo. Produce JSON con INVEST + ISO + Gherkin + PERT + Riesgos + Dependencias
 ├── spec-writer           ← Genera specs ASDD por HU aprobada (pipeline 5 pasos + Gate 0)
 ├── client-report-generator  ← Enriquece data.json con informe_cliente
 └── report-builder        ← Inyecta data.json en el template HTML
 ```
 
-### Threshold adaptativo (Ola 2)
+**Orquestación adaptativa**: sprints con ≤ 5 HUs usan Modo A (sub-agente `orchestrator` hace todo el flujo); sprints con > 5 HUs usan Modo B (el asistente principal lanza `hu-full-analyzer` en paralelo + `scripts/consolidate-sprint.js` para consolidar). Esto evita el token-limit del sub-agente en sprints grandes.
 
-| Tamaño del sprint | Modo de orquestación | Razón |
-|---|---|---|
-| **N ≤ 5 HUs** | Modo A — sub-agente `orchestrator` hace todo el flujo | Una sola invocación, lógica encapsulada |
-| **N > 5 HUs** | Modo B — asistente principal orquesta directamente | Evita el token-limit del sub-agente; cada analyzer usa su presupuesto aislado |
+**Resumabilidad**: cada ejecución persiste checkpoint en `output/<sprint>/.checkpoint.json`; si falla a mitad, `scripts/checkpoint.js list-completed <sprint>` identifica las HUs ya analizadas y el asistente salta esas al reanudar.
 
-En Modo B, el asistente lanza N `hu-full-analyzer` en paralelo y luego invoca `scripts/consolidate-sprint.js` para consolidar + inyectar HTML.
-
-### Resumabilidad (Ola 2)
-
-Cada fase larga persiste checkpoint en `output/<sprint>/.checkpoint.json`. Si una ejecución falla a mitad:
-- `scripts/checkpoint.js list-completed <sprint>` lista las HUs ya analizadas (leyendo `tmp/*.json`)
-- El asistente **salta** esas HUs al reanudar — no re-procesa lo ya hecho
-- Al terminar OK, el checkpoint se borra automáticamente
+> Contrato normativo completo (threshold exacto, regla de decisión, reglas anti-tokenburn, reglas del sistema): [CLAUDE.md](CLAUDE.md).
 
 ---
 
@@ -397,8 +388,7 @@ PM-refinador/
 │   │   ├── spec-writer.md          ← Actualizado con marco ASDD
 │   │   ├── client-report-generator.md
 │   │   ├── report-builder.md
-│   │   ├── _legacy/                ← Agentes anteriores (no usados)
-│   │   └── _kit-base/              ← 101 agentes del JM Kit (READ-ONLY)
+│   │   └── _legacy/                ← Agentes anteriores (no usados)
 │   ├── skills/                     ← Skills (comandos /refinar-*, /generar-*)
 │   │   ├── refinar-sprint/
 │   │   ├── refinar-hu/
@@ -424,6 +414,7 @@ PM-refinador/
 │   │   ├── contexto-funcional.template.md
 │   │   └── contexto-tecnico.template.md
 │   └── referencia/                 ← ISO 29148, 25010, INVEST, RISICAR, etc.
+│       └── kit-base-agents/        ← 101 agentes del JM Kit (consulta humana)
 ├── templates/
 │   ├── core/
 │   │   ├── sprint-dashboard.html   ← Template único (no modificar)
