@@ -28,19 +28,27 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 function die(msg, code) { console.error('✗ ' + msg); process.exit(code || 1); }
+
+// Ejecuta `node <script> <args...>` sin pasar por shell intermedio.
+// Portable a Windows (cmd.exe/PowerShell), macOS y Linux: evita el problema de
+// comillas simples que en cmd.exe se tratan literalmente y corrompen el JSON.
+function runNode(scriptArgs, opts) {
+  return spawnSync(process.execPath, scriptArgs, { shell: false, ...(opts || {}) });
+}
 
 function checkpointSave(sprintId, phase, data) {
   // Best-effort — si checkpoint.js falla no bloqueamos el flujo.
   try {
-    const dataArg = data ? ` --data='${JSON.stringify(data).replace(/'/g, "'\\''")}'` : '';
-    execSync(`node scripts/checkpoint.js save ${sprintId} ${phase}${dataArg}`, { stdio: 'ignore' });
+    const args = ['scripts/checkpoint.js', 'save', sprintId, phase];
+    if (data) { args.push('--data', JSON.stringify(data)); }
+    runNode(args, { stdio: 'ignore' });
   } catch (_) { /* silent */ }
 }
 function checkpointClear(sprintId) {
-  try { execSync(`node scripts/checkpoint.js clear ${sprintId}`, { stdio: 'ignore' }); }
+  try { runNode(['scripts/checkpoint.js', 'clear', sprintId], { stdio: 'ignore' }); }
   catch (_) { /* silent */ }
 }
 
@@ -353,7 +361,7 @@ function main() {
 
   // Emitir siguiente paso sugerido al PM (U2 de Ola 2)
   try {
-    execSync(`node scripts/next-step.js ${manifest.sprint_id}`, { stdio: 'inherit' });
+    runNode(['scripts/next-step.js', manifest.sprint_id], { stdio: 'inherit' });
   } catch (_) { /* next-step es informativo, no bloqueamos si falla */ }
 }
 

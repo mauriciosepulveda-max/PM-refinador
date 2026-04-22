@@ -27,15 +27,20 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 function worktreeInfoBlock(relPath) {
   // Best-effort — si el script no está o falla, no imprimir nada
   try {
-    const args = ['node', 'scripts/worktree-info.js'];
+    const args = ['scripts/worktree-info.js'];
     if (relPath) { args.push('--relative-path', relPath); }
-    const out = execSync(args.join(' '), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    return out.trimEnd();
+    const res = spawnSync(process.execPath, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      shell: false,
+    });
+    if (res.status !== 0 || !res.stdout) return '';
+    return res.stdout.trimEnd();
   } catch (_) { return ''; }
 }
 
