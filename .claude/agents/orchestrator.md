@@ -65,7 +65,7 @@ Si por cualquier motivo vas a cerrar sin progreso, emite `[RR·PAUSE] sin progre
 
 ## Fase -1 — Pre-flight (G0)
 
-**Paso 1 (infra):** ejecutar `Bash(command="bash scripts/preflight-check.sh")`. Chequea merge markers, registro de skills/agentes y sintaxis JS del template. Si exit ≠ 0: `[RR·CKPT] PRE ✗ · preflight fallido · <ver salida>` y abortar sin preguntar.
+**Paso 1 (infra):** ejecutar `Bash(command="node scripts/preflight-check.js")`. Chequea merge markers, registro de skills/agentes y sintaxis JS del template. Si exit ≠ 0: `[RR·CKPT] PRE ✗ · preflight fallido · <ver salida>` y abortar sin preguntar.
 
 **Paso 2 (insumos)** — verificar existencia y validez de cada path en `inputs_paths`:
 

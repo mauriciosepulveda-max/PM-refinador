@@ -111,7 +111,7 @@ Cuando estos consumidores se actualicen, deberán:
 - [ ] Si es MINOR o MAJOR: `hu-full-analyzer.md` actualizado con el cambio
 - [ ] Si es MINOR o MAJOR: `sprint-dashboard.html` actualizado (con fallback si MINOR, sin fallback si MAJOR)
 - [ ] Si afectó scoring o cobertura: `expectations_version` en fixtures bumpeado y nota del ajuste en el PR
-- [ ] `bash scripts/preflight-check.sh` pasa
+- [ ] `node scripts/preflight-check.js` pasa
 - [ ] Nota en el PR indicando tipo de bump (PATCH/MINOR/MAJOR) y motivo
 
 ---

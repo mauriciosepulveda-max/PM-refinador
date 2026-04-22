@@ -27,7 +27,7 @@ Elige según cantidad de HUs a re-analizar (threshold `ORCHESTRATOR_HU_THRESHOLD
 ## Proceso
 
 ### Fase -1 · Pre-flight
-Ejecutar `bash: bash scripts/preflight-check.sh`. Si exit ≠ 0, abortar con `[RR·CKPT] PRE ✗`.
+Ejecutar `Bash(command="node scripts/preflight-check.js")`. Si exit ≠ 0, abortar con `[RR·CKPT] PRE ✗`.
 
 ### Fase 0 · Lectura + clasificación
 1. Leer `output/<sprint-id>/data.json`

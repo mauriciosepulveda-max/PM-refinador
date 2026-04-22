@@ -26,7 +26,7 @@ Para reducir la fricción del PM al arrancar un sprint nuevo:
 - **`--init`** crea `docs/HUs/<sprint-id>/` vacío y copia `contexto-*.template.md` → `contexto-*.md` si aún no existen. Útil cuando las HUs se van a redactar directamente en el repo.
 - **`--ingest <ruta>`** copia todos los archivos `.md` sueltos de `<ruta>` a `docs/HUs/<sprint-id>/`. Si la ruta externa contiene `contexto-funcional.md` / `contexto-tecnico.md` (recursivo), los importa también. Valida que cada HU tenga narrativa + criterios de aceptación mínimos.
 
-Ambos modos delegan la lógica a `scripts/init-sprint.sh`. Al terminar, emiten el siguiente paso sugerido. NO corren el análisis — el PM ejecuta `/refinar-sprint <sprint-id>` después.
+Ambos modos delegan la lógica a `scripts/init-sprint.js`. Al terminar, emiten el siguiente paso sugerido. NO corren el análisis — el PM ejecuta `/refinar-sprint <sprint-id>` después.
 
 ## Arquitectura (Principios)
 
@@ -43,7 +43,7 @@ Ambos modos delegan la lógica a `scripts/init-sprint.sh`. Al terminar, emiten e
 
 ### Fase -1 — Pre-flight (G0, NO interactivo, ANTES de cualquier pregunta)
 
-**Paso 1 (framework sano):** ejecutar `bash scripts/preflight-check.sh`. Si exit ≠ 0, abortar con `[RR·CKPT] PRE ✗ · preflight fallido · ver salida` sin preguntar al PM.
+**Paso 1 (framework sano):** ejecutar `node scripts/preflight-check.js`. Si exit ≠ 0, abortar con `[RR·CKPT] PRE ✗ · preflight fallido · ver salida` sin preguntar al PM.
 
 **Paso 2 (insumos del sprint):** verificar en paralelo (`Read` / `Glob`):
 
@@ -202,7 +202,7 @@ El asistente principal ejecuta las fases paso a paso (evita token-limit del sub-
 
 **Fase 1 — Análisis en paralelo (asistente principal):**
 
-1. Antes de lanzar, consultar el checkpoint: `bash scripts/checkpoint.js list-completed <sprint-id>` → devuelve IDs de HUs ya analizadas (JSONs existentes en `tmp/`).
+1. Antes de lanzar, consultar el checkpoint: `node scripts/checkpoint.js list-completed <sprint-id>` → devuelve IDs de HUs ya analizadas (JSONs existentes en `tmp/`).
 2. Lanzar en paralelo (un mensaje con N `Agent(subagent_type="hu-full-analyzer", prompt=...)`, donde N = HUs pendientes):
    ```
    [SPRINT]: <sprint-id>
@@ -214,7 +214,7 @@ El asistente principal ejecuta las fases paso a paso (evita token-limit del sub-
    ```
 3. Guardar cada JSON de respuesta en `output/<sprint-id>/tmp/<hu_id>.json` (usar Write).
 4. Tras recibir los N: `[RR·CKPT] Fase 1 ✓ · N JSONs recibidos`.
-5. `bash scripts/checkpoint.js save <sprint-id> analysis_complete` para persistir progreso.
+5. `node scripts/checkpoint.js save <sprint-id> analysis_complete` para persistir progreso.
 
 **Fase 2-4 — Consolidación + HTML (vía script):**
 

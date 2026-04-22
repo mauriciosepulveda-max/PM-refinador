@@ -1,0 +1,27 @@
+# Mantener line endings LF en scripts y fuentes — evita romper `bash` en Git Bash
+# cuando core.autocrlf=true convierte los shebangs a CRLF.
+* text=auto eol=lf
+
+# Scripts ejecutables (shell, python, powershell) — siempre LF
+*.sh   text eol=lf
+*.py   text eol=lf
+*.ps1  text eol=crlf
+
+# Código JS/TS/JSON — LF
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.json text eol=lf
+
+# Markdown, HTML, CSS — LF
+*.md   text eol=lf
+*.html text eol=lf
+*.css  text eol=lf
+
+# Binarios — no tocar
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.pdf  binary
+*.zip  binary

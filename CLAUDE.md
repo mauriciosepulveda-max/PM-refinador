@@ -77,7 +77,7 @@ Si el asistente detecta que ya publicó un anuncio sin tool call en un turno pre
 1. Reconocerlo explícitamente ("El turno anterior anuncié sin ejecutar"), y
 2. Emitir el tool call pendiente o un `[RR·PAUSE]` con la causa real.
 
-**Esta regla se refuerza con** `scripts/preflight-check.sh` (chequeos automáticos) y los quality gates G3.1/G3.2 de `scripts/consolidate-sprint.js` (validación post-write del HTML).
+**Esta regla se refuerza con** `scripts/preflight-check.js` (chequeos automáticos) y los quality gates G3.1/G3.2 de `scripts/consolidate-sprint.js` (validación post-write del HTML).
 
 ---
 
@@ -181,7 +181,7 @@ La estructura completa de carpetas vive en [README.md](README.md#estructura-del-
 - `docs/contexto/contexto-{funcional,tecnico}.md` — **contexto obligatorio**. El `contexto-tecnico.md` sección 6 define librerías permitidas/prohibidas, convenciones y herramientas obligatorias del sprint (el framework es agnóstico a tecnologías: no hay stack global, cada sprint declara el suyo).
 - `templates/core/sprint-dashboard.html` + `hu-calidad.schema.json` — templates críticos (el orquestador los lee).
 - `output/<sprint-id>/{index.html, data.json[, data.previous.json, tmp/, .checkpoint.json]}` — entregables y estado runtime.
-- `scripts/` — utilidades (`preflight-check.sh`, `consolidate-sprint.js`, `validate-hu-json.js`, `regression-check.js`, `checkpoint.js`, `next-step.js`, `init-sprint.sh`).
+- `scripts/` — utilidades (`preflight-check.js`, `consolidate-sprint.js`, `validate-hu-json.js`, `regression-check.js`, `checkpoint.js`, `next-step.js`, `init-sprint.js`, `limpiar.js`). Todos en Node — portables a Windows/macOS/Linux sin bash.
 
 ---
 
@@ -269,7 +269,7 @@ Cada regla lleva un tag que indica qué pasa si se viola y cómo se hace cumplir
 
 ## Checklist post-refactor
 
-Corre `bash scripts/preflight-check.sh` (4 chequeos: merge markers, 5/5 skills registradas, 5/5 agentes registrados, JS del template compila). Exit 0 = OK · 1 = fallos · 2 = error.
+Corre `node scripts/preflight-check.js` (4 chequeos: merge markers, 5/5 skills registradas, 5/5 agentes registrados, JS del template compila). Exit 0 = OK · 1 = fallos · 2 = error.
 
 Se invoca automáticamente como primer paso de Fase -1 del orchestrator. Se recomienda engancharlo a pre-commit local (`git config core.hooksPath .claude/hooks`).
 
