@@ -6,7 +6,7 @@
  * Usa `output/<sprint-id>/.checkpoint.json` como estado.
  *
  * Uso:
- *   node scripts/checkpoint.js save <sprint-id> <phase> [--data='<json>']
+ *   node scripts/checkpoint.js save <sprint-id> <phase> [--data <json>]
  *   node scripts/checkpoint.js load <sprint-id>
  *   node scripts/checkpoint.js clear <sprint-id>
  *   node scripts/checkpoint.js list-completed <sprint-id>
@@ -18,10 +18,13 @@
  *
  * Al completar todo (phase = `reported`), se borra el checkpoint (marca éxito limpio).
  *
- * Invocación desde bash:
- *   node scripts/checkpoint.js save Sprint-144 analysis_partial --data='{"hus_completed":["HU-1"]}'
+ * Invocación desde Node (portable Windows/macOS/Linux):
+ *   node scripts/checkpoint.js save Sprint-144 analysis_partial --data '{"hus_completed":["HU-1"]}'
  *   node scripts/checkpoint.js list-completed Sprint-144   # → "HU-1 HU-2 ..." (stdout)
  *   node scripts/checkpoint.js clear Sprint-144
+ *
+ * Formato legacy aceptado por back-compat (NO usar en nuevos callers):
+ *   --data='{"hus_completed":["HU-1"]}'   # requiere shell sh/bash
  *
  * Exit codes:
  *   0 = OK
@@ -47,9 +50,18 @@ function parseArgs(argv) {
   let phase = null, data = {};
   if (cmd === 'save') {
     phase = rest[0];
-    for (const a of rest.slice(1)) {
+    const tail = rest.slice(1);
+    for (let i = 0; i < tail.length; i++) {
+      const a = tail[i];
+      let raw = null;
       if (a.startsWith('--data=')) {
-        try { data = JSON.parse(a.slice('--data='.length)); }
+        raw = a.slice('--data='.length);
+      } else if (a === '--data' && i + 1 < tail.length) {
+        raw = tail[i + 1];
+        i++;
+      }
+      if (raw !== null) {
+        try { data = JSON.parse(raw); }
         catch (e) { console.error('--data no es JSON válido: ' + e.message); process.exit(1); }
       }
     }
