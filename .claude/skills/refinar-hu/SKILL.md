@@ -25,7 +25,7 @@ Cada fase emite un `[RR·CKPT]` visible al PM.
 
 ### Fase -1 — Pre-flight
 
-Ejecutar `bash: bash scripts/preflight-check.sh`. Si exit ≠ 0, abortar con `[RR·CKPT] PRE ✗` sin preguntar.
+Ejecutar `Bash(command="node scripts/preflight-check.js")`. Si exit ≠ 0, abortar con `[RR·CKPT] PRE ✗` sin preguntar.
 
 ### Fase 0 — Validacion de Insumos (BLOQUEANTE)
 

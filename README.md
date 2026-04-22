@@ -37,8 +37,10 @@ Claude Code a veces crea ramas o carpetas de trabajo temporales durante sesiones
 
 ```bash
 cd ~/Documents/PM-refinador
-bash scripts/limpiar.sh
+node scripts/limpiar.js
 ```
+
+> Funciona igual en macOS, Linux y Windows (PowerShell / cmd.exe / Git Bash). Solo necesitas Node ≥ 18. El script detecta automáticamente el repo principal aunque lo ejecutes desde una worktree.
 
 Esto:
 - ✅ Te deja en la rama `main` (la oficial)
@@ -74,14 +76,14 @@ Edita ambos archivos con la información real de tu proyecto (dominio, stack, in
 
 **Opción A — sprint nuevo desde cero:**
 ```bash
-bash scripts/init-sprint.sh Sprint-144 --init
+node scripts/init-sprint.js Sprint-144 --init
 ```
 
 Esto crea `docs/HUs/Sprint-144/` vacío y deja los templates de contexto listos (si no existían).
 
 **Opción B — ingerir HUs desde otra carpeta** (útil cuando las HUs vienen de un cliente o un sharepoint exportado):
 ```bash
-bash scripts/init-sprint.sh Sprint-144 --ingest /ruta/al/otro/proyecto/HUs/
+node scripts/init-sprint.js Sprint-144 --ingest /ruta/al/otro/proyecto/HUs/
 ```
 
 Copia todos los `.md` sueltos al worktree, detecta contextos funcionales/técnicos si existen y valida el formato mínimo.
@@ -130,7 +132,7 @@ El dashboard HITL incluye:
 
 ```
                  ┌──────────────────┐
-                 │  1. Setup del    │   init-sprint.sh --init | --ingest
+                 │  1. Setup del    │   init-sprint.js --init | --ingest
                  │     sprint       │
                  └────────┬─────────┘
                           ▼
@@ -249,8 +251,9 @@ En cada paso, `scripts/next-step.js` emite un banner con el comando exacto sigui
 
 | Script | Uso | Cuándo |
 |---|---|---|
-| `scripts/preflight-check.sh` | Valida framework (merge markers · skills/agents registrados · JS del template) | Antes de commit o invocación de skill |
-| `scripts/init-sprint.sh Sprint-X --init \| --ingest <ruta>` | Onboarding asistido del sprint | Antes de agregar HUs |
+| `scripts/preflight-check.js` | Valida framework (merge markers · skills/agents registrados · JS del template) | Antes de commit o invocación de skill |
+| `scripts/init-sprint.js Sprint-X --init \| --ingest <ruta>` | Onboarding asistido del sprint | Antes de agregar HUs |
+| `scripts/limpiar.js` | Vuelve el repo a `main` limpio (borra worktrees/ramas de sesión) | Cuando el repo quede "raro" tras muchas sesiones |
 | `scripts/consolidate-sprint.js <manifest>` | Consolida N JSONs + inyecta HTML con post-write validation | Interno de `/refinar-sprint` Modo B |
 | `scripts/validate-hu-json.js <path>` | Valida un JSON de HU contra el schema (Ajv con fallback) | Interno de Fase 2 |
 | `scripts/regression-check.js <expectations> <output>` | Valida **calidad** del output contra golden expectations (rangos ISO, coberturas, PERT, preguntas HITL) | Detectar regresiones del analyzer sin correr sobre HUs reales · ver [docs/HUs/\_fixtures/README.md](docs/HUs/_fixtures/README.md) |
@@ -396,9 +399,10 @@ PM-refinador/
 │   │   ├── generar-informe/
 │   │   └── generar-specs/          ← Pipeline ASDD
 │   └── scripts/watchdog-empty-turn.js
-├── scripts/                        ← Scripts utilitarios Node/Bash
-│   ├── preflight-check.sh
-│   ├── init-sprint.sh
+├── scripts/                        ← Scripts utilitarios Node (portables)
+│   ├── preflight-check.js
+│   ├── init-sprint.js
+│   ├── limpiar.js
 │   ├── consolidate-sprint.js
 │   ├── validate-hu-json.js
 │   ├── regression-check.js         ← Golden expectations de calidad
@@ -451,7 +455,7 @@ PM-refinador/
 
 **Skill no encontrada al invocar `/refinar-sprint`**
 ```bash
-bash scripts/preflight-check.sh
+node scripts/preflight-check.js
 ```
 Verifica que las 5 skills y 5 agentes estén registrados en las rutas correctas.
 
@@ -462,7 +466,7 @@ node -e "const fs=require('fs'); const h=fs.readFileSync('output/<sprint>/index.
 ```
 
 **Token-limit al ejecutar sprint grande (>5 HUs)**
-El framework usa **Modo B** automáticamente desde 6 HUs (orquestación distribuida). Si falla, verifica que existe `scripts/consolidate-sprint.js` y corre `bash scripts/preflight-check.sh`.
+El framework usa **Modo B** automáticamente desde 6 HUs (orquestación distribuida). Si falla, verifica que existe `scripts/consolidate-sprint.js` y corre `node scripts/preflight-check.js`.
 
 **Fechas guardadas como "0002" en el dashboard**
 `sanitizeISODate` auto-sana al cargar. Si persiste el problema, borra localStorage del navegador o usa el botón "🗑 Limpiar" en la tab Avance.
